@@ -1,0 +1,8 @@
+# Test dependencies only — not installed in the production Docker image.
+# Install with: pip install -r requirements-dev.txt -r requirements.txt
+#
+# Integration tests need a real Postgres (the schema uses ARRAY/JSONB
+# columns SQLite can't represent) — run `docker compose up -d db` first,
+# or point TEST_DATABASE_URL at any throwaway Postgres instance.
+pytest==8.3.4
+pytest-asyncio==0.25.0
