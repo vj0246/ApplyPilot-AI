@@ -3,9 +3,9 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import toast from "react-hot-toast";
-import { User, Briefcase, Sliders, Loader2 } from "lucide-react";
+import { User, Briefcase, Sliders, Loader2, BrainCircuit, Mail, CheckCircle2 } from "lucide-react";
 import { profileApi, authApi } from "@/lib/api";
-import { Card } from "@/components/ui";
+import { Card, Textarea } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -13,6 +13,8 @@ const TABS = [
   { id: "account",     label: "Account",     icon: User },
   { id: "preferences", label: "Job Preferences", icon: Briefcase },
   { id: "ai",          label: "AI Settings", icon: Sliders },
+  { id: "knowledge",   label: "Knowledge Graph", icon: BrainCircuit },
+  { id: "email",       label: "Email Account", icon: Mail },
 ];
 
 const EXPERIENCE = ["intern", "entry", "mid", "senior", "staff", "lead"];
@@ -44,6 +46,48 @@ export default function SettingsPage() {
   });
 
   const [accountForm, setAccountForm] = useState({ full_name: user?.full_name || "" });
+
+  // ── Knowledge graph ──────────────────────────────────────────────
+  const { data: kgQuestions } = useQuery({
+    queryKey: ["knowledge-graph-questions"],
+    queryFn: () => profileApi.knowledgeGraphQuestions().then(r => r.data.questions as string[]),
+  });
+  const [kgAnswers, setKgAnswers] = useState<Record<string, string>>({});
+
+  const buildGraphMut = useMutation({
+    mutationFn: () =>
+      profileApi.buildKnowledgeGraph(
+        Object.entries(kgAnswers)
+          .filter(([, answer]) => answer.trim())
+          .map(([question, answer]) => ({ question, answer }))
+      ),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["profile"] }); toast.success("Knowledge graph built from your answers"); },
+    onError: (err: any) => toast.error(err.response?.data?.detail || "Could not build the knowledge graph"),
+  });
+
+  const knowledgeGraph = profile?.knowledge_graph;
+  const hasGraph = knowledgeGraph && (knowledgeGraph.identity || (knowledgeGraph.values || []).length > 0);
+
+  // ── Email account ────────────────────────────────────────────────
+  const [emailForm, setEmailForm] = useState({
+    sender_email: "", smtp_host: "smtp.gmail.com", smtp_port: 587,
+    smtp_username: "", smtp_password: "",
+  });
+
+  const saveEmailMut = useMutation({
+    mutationFn: () => profileApi.setEmailCredentials(emailForm),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["profile"] });
+      toast.success("Email account connected");
+      setEmailForm((f) => ({ ...f, smtp_password: "" }));
+    },
+    onError: (err: any) => toast.error(err.response?.data?.detail || "Could not save email account"),
+  });
+
+  const clearEmailMut = useMutation({
+    mutationFn: () => profileApi.clearEmailCredentials(),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["profile"] }); toast.success("Email account disconnected"); },
+  });
 
   if (isLoading) {
     return <div className="p-8"><Loader2 className="w-6 h-6 text-gray-300 animate-spin" /></div>;
@@ -197,6 +241,175 @@ export default function SettingsPage() {
                 </p>
               </Card>
             </form>
+          )}
+
+          {tab === "knowledge" && (
+            <div className="space-y-5">
+              <Card className="bg-indigo-50 border-indigo-100">
+                <div className="flex gap-3">
+                  <BrainCircuit className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
+                  <div className="text-sm text-indigo-900">
+                    <p className="font-medium mb-0.5">A knowledge graph of you, not just your resume</p>
+                    <p className="text-indigo-700">
+                      Answer these in your own words. The answers are turned into a structured
+                      profile of your values, strengths, and motivations, and every form answer
+                      and email this tool writes is grounded in it, not just in your resume text.
+                    </p>
+                  </div>
+                </div>
+              </Card>
+
+              {hasGraph && (
+                <Card className="space-y-3">
+                  <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Current knowledge graph
+                  </h2>
+                  {knowledgeGraph?.identity && (
+                    <p className="text-sm text-gray-700"><span className="font-medium">Identity: </span>{knowledgeGraph.identity}</p>
+                  )}
+                  {(knowledgeGraph?.values || []).length > 0 && (
+                    <p className="text-sm text-gray-700"><span className="font-medium">Values: </span>{knowledgeGraph!.values!.join(", ")}</p>
+                  )}
+                  {(knowledgeGraph?.strengths || []).length > 0 && (
+                    <p className="text-sm text-gray-700"><span className="font-medium">Strengths: </span>{knowledgeGraph!.strengths!.join(", ")}</p>
+                  )}
+                  {(knowledgeGraph?.motivations || []).length > 0 && (
+                    <p className="text-sm text-gray-700"><span className="font-medium">Motivations: </span>{knowledgeGraph!.motivations!.join(", ")}</p>
+                  )}
+                  {(knowledgeGraph?.goals || []).length > 0 && (
+                    <p className="text-sm text-gray-700"><span className="font-medium">Goals: </span>{knowledgeGraph!.goals!.join(", ")}</p>
+                  )}
+                </Card>
+              )}
+
+              <Card className="space-y-5">
+                <h2 className="font-semibold text-gray-900">{hasGraph ? "Update your answers" : "Answer these to build it"}</h2>
+                {(kgQuestions || []).map((q) => (
+                  <div key={q}>
+                    <label className="label">{q}</label>
+                    <Textarea
+                      value={kgAnswers[q] || ""}
+                      onChange={(e) => setKgAnswers((a) => ({ ...a, [q]: e.target.value }))}
+                      rows={3}
+                    />
+                  </div>
+                ))}
+                <button
+                  onClick={() => buildGraphMut.mutate()}
+                  disabled={buildGraphMut.isPending || Object.values(kgAnswers).every((v) => !v.trim())}
+                  className="btn-primary w-full justify-center py-2.5"
+                >
+                  {buildGraphMut.isPending ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Building your knowledge graph...</>
+                  ) : (
+                    <><BrainCircuit className="w-4 h-4" /> Build knowledge graph</>
+                  )}
+                </button>
+              </Card>
+            </div>
+          )}
+
+          {tab === "email" && (
+            <div className="space-y-5">
+              <Card className="bg-blue-50 border-blue-100">
+                <div className="flex gap-3">
+                  <Mail className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                  <div className="text-sm text-blue-900">
+                    <p className="font-medium mb-0.5">Sends from your own address</p>
+                    <p className="text-blue-700">
+                      This connects your own mailbox so the application email goes out as you, not
+                      as this tool. Use an app password, never your real account password. On
+                      Gmail, turn on two factor authentication and create an app password under
+                      your Google account security settings. On Outlook, use smtp.office365.com.
+                      Nothing is sent automatically, every email is drafted first and only goes out
+                      when you press send.
+                    </p>
+                  </div>
+                </div>
+              </Card>
+
+              <Card className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="font-semibold text-gray-900">Sending account</h2>
+                  {profile?.email_account_configured && (
+                    <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Connected as {profile.sender_email}
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <label className="label">Your email address</label>
+                  <input
+                    value={emailForm.sender_email}
+                    onChange={(e) => setEmailForm((f) => ({ ...f, sender_email: e.target.value }))}
+                    placeholder="you@gmail.com"
+                    className="input"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="label">SMTP server</label>
+                    <input
+                      value={emailForm.smtp_host}
+                      onChange={(e) => setEmailForm((f) => ({ ...f, smtp_host: e.target.value }))}
+                      placeholder="smtp.gmail.com"
+                      className="input"
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Port</label>
+                    <input
+                      type="number"
+                      value={emailForm.smtp_port}
+                      onChange={(e) => setEmailForm((f) => ({ ...f, smtp_port: Number(e.target.value) }))}
+                      className="input"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="label">Username</label>
+                  <input
+                    value={emailForm.smtp_username}
+                    onChange={(e) => setEmailForm((f) => ({ ...f, smtp_username: e.target.value }))}
+                    placeholder="Usually the same as your email address"
+                    className="input"
+                  />
+                </div>
+
+                <div>
+                  <label className="label">App password</label>
+                  <input
+                    type="password"
+                    value={emailForm.smtp_password}
+                    onChange={(e) => setEmailForm((f) => ({ ...f, smtp_password: e.target.value }))}
+                    placeholder="Stored only in encrypted form"
+                    className="input"
+                  />
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => saveEmailMut.mutate()}
+                    disabled={saveEmailMut.isPending || !emailForm.sender_email || !emailForm.smtp_password}
+                    className="btn-primary"
+                  >
+                    {saveEmailMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Connect account"}
+                  </button>
+                  {profile?.email_account_configured && (
+                    <button
+                      onClick={() => clearEmailMut.mutate()}
+                      disabled={clearEmailMut.isPending}
+                      className="btn-secondary text-red-600 border-red-200 hover:bg-red-50"
+                    >
+                      Disconnect
+                    </button>
+                  )}
+                </div>
+              </Card>
+            </div>
           )}
         </div>
       </div>

@@ -26,4 +26,8 @@ ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# --reload is for local dev only (docker-compose overrides nothing, but the
+# bind mount there makes it useful). In production it wastes memory watching
+# files that never change. docker-compose keeps hot reload via its own
+# command override below if you ever want it back locally.
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

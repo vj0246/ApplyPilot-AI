@@ -1,20 +1,24 @@
 """
 autofill_service.py
 --------------------
-Paste a Google Form link, get it filled in. This never clicks submit —
-it fills every field with an AI-generated answer, screenshots the result,
-and stops. You open the real form and submit it yourself.
+Paste a Google Form or a Microsoft Form link, get it filled in. This never
+clicks submit — it fills every field with an AI-generated answer,
+screenshots the result, and stops. You open the real form and submit it
+yourself.
 
-That's the actual design, not a missing feature: Google flags fill+submit
-bots as spam, a bad AI answer deserves a human glance before it goes out,
-and if something here goes wrong the blast radius is "you notice and fix
-it" instead of "a recruiter already has it."
+That's the actual design, not a missing feature: both providers flag
+fill+submit bots as spam, a bad AI answer deserves a human glance before
+it goes out, and if something here goes wrong the blast radius is "you
+notice and fix it" instead of "a recruiter already has it."
 
 Playwright drives a real headless Chromium and reads the page DOM the way
 a person's browser would. Google Forms structures each question as a
-`<div role="listitem">` — we scrape that, send the questions through the
-same answer_form_questions() the manual form-filler tab uses, then type/
-click the answers into the live page.
+`<div role="listitem">`; Microsoft Forms leans on the same kind of ARIA
+roles (radiogroup, radio, checkbox, listbox) inside a question container,
+so both scrapers read role attributes rather than CSS class names, which
+break the moment either provider ships a redesign. Both providers send
+the scraped questions through the same answer_form_questions() the manual
+form filler tab uses, then type/click the answers into the live page.
 """
 import asyncio
 import base64
@@ -50,6 +54,14 @@ class FilledField:
 
 def is_google_form_url(url: str) -> bool:
     return "docs.google.com/forms" in url
+
+
+def is_microsoft_form_url(url: str) -> bool:
+    return "forms.office.com" in url or "forms.microsoft.com" in url or "forms.office365.com" in url
+
+
+def is_supported_form_url(url: str) -> bool:
+    return is_google_form_url(url) or is_microsoft_form_url(url)
 
 
 # ── Step 1: scrape questions off the live page ──────────────────────────
@@ -141,6 +153,7 @@ async def get_answers_for_fields(
     resume_parsed: Dict,
     job_parsed: Optional[Dict],
     extra_context: str = "",
+    knowledge_graph: Optional[Dict] = None,
 ) -> List[FilledField]:
     questions_for_ai = []
     for f in fields:
@@ -158,6 +171,7 @@ async def get_answers_for_fields(
         resume_parsed=resume_parsed,
         job_parsed=job_parsed,
         extra_context=extra_context,
+        knowledge_graph=knowledge_graph,
     )
 
     filled: List[FilledField] = []
@@ -268,6 +282,145 @@ async def fill_google_form(page: Page, filled_fields: List[FilledField]) -> None
             continue
 
 
+# ── Microsoft Forms: scrape and fill ─────────────────────────────────────
+# Microsoft Forms does not publish a structure API either, so this leans on
+# the same accessibility roles a screen reader would use: each question
+# sits in a container we can find by role="group" or a data automation id,
+# with role="radiogroup" plus role="radio" children for single choice,
+# role="group" plus role="checkbox" children for multiple choice, and a
+# plain textarea or text input otherwise. The first thing to break if
+# Microsoft ships a redesign is this role mapping, same trade as the
+# Google Forms scraper above.
+
+async def scrape_microsoft_form(page: Page) -> Dict[str, Any]:
+    title = ""
+    try:
+        title_el = await page.query_selector("h1")
+        if title_el:
+            title = (await title_el.inner_text()).strip()
+    except Exception:
+        pass
+
+    items = await page.query_selector_all("div[data-automation-id='questionItem'], div[role='group']")
+    fields: List[FormField] = []
+    seen_questions = set()
+
+    for idx, item in enumerate(items):
+        try:
+            field_data = await _read_single_ms_question(item, idx)
+            if field_data and field_data.question not in seen_questions:
+                fields.append(field_data)
+                seen_questions.add(field_data.question)
+        except Exception as e:
+            log.warning(f"Couldn't parse Microsoft Form item {idx}: {e}")
+            continue
+
+    return {"title": title, "fields": fields}
+
+
+async def _read_single_ms_question(item, idx: int) -> Optional[FormField]:
+    heading = await item.query_selector("[role='heading'], .text-format-content, label")
+    if not heading:
+        return None
+    question_text = (await heading.inner_text()).strip()
+    if not question_text:
+        return None
+
+    required = "*" in question_text[-2:]
+    question_text = question_text.rstrip("*").strip()
+
+    radiogroup = await item.query_selector("[role='radiogroup']")
+    if radiogroup:
+        radios = await radiogroup.query_selector_all("[role='radio']")
+        options = [lbl.strip() for r in radios if (lbl := await r.get_attribute("aria-label") or await r.inner_text())]
+        if options:
+            return FormField(idx, question_text, "radio", options, required)
+
+    checkboxes = await item.query_selector_all("[role='checkbox']")
+    if checkboxes:
+        options = [lbl.strip() for c in checkboxes if (lbl := await c.get_attribute("aria-label") or await c.inner_text())]
+        if options:
+            return FormField(idx, question_text, "checkbox", options, required)
+
+    listbox = await item.query_selector("[role='listbox'], select")
+    if listbox:
+        options = await _read_dropdown_options(listbox)
+        return FormField(idx, question_text, "dropdown", options, required)
+
+    textarea = await item.query_selector("textarea")
+    if textarea:
+        return FormField(idx, question_text, "paragraph", [], required)
+
+    text_input = await item.query_selector("input[type='text']")
+    if text_input:
+        return FormField(idx, question_text, "text", [], required)
+
+    # file upload, date picker, rating scale etc — skip rather than guess
+    return None
+
+
+async def fill_microsoft_form(page: Page, filled_fields: List[FilledField]) -> None:
+    items = await page.query_selector_all("div[data-automation-id='questionItem'], div[role='group']")
+
+    for ff in filled_fields:
+        if ff.index >= len(items) or not ff.answer:
+            continue
+        item = items[ff.index]
+        try:
+            if ff.field_type == "text":
+                inp = await item.query_selector("input[type='text']")
+                if inp:
+                    await inp.click()
+                    await inp.fill(ff.answer)
+
+            elif ff.field_type == "paragraph":
+                ta = await item.query_selector("textarea")
+                if ta:
+                    await ta.click()
+                    await ta.fill(ff.answer)
+
+            elif ff.field_type == "radio":
+                radios = await item.query_selector_all("[role='radio']")
+                for r in radios:
+                    label = (await r.get_attribute("aria-label")) or (await r.inner_text())
+                    if label and label.strip() == ff.answer:
+                        await r.click()
+                        break
+
+            elif ff.field_type == "checkbox":
+                chosen = [a.strip() for a in ff.answer.split(",") if a.strip()]
+                boxes = await item.query_selector_all("[role='checkbox']")
+                for b in boxes:
+                    label = (await b.get_attribute("aria-label")) or (await b.inner_text())
+                    if label and label.strip() in chosen:
+                        await b.click()
+
+            elif ff.field_type == "dropdown":
+                listbox = await item.query_selector("[role='listbox'], select")
+                if listbox:
+                    await listbox.click()
+                    await asyncio.sleep(0.3)
+                    opts = await listbox.query_selector_all("[role='option'], option")
+                    found = False
+                    for o in opts:
+                        t = (await o.inner_text()).strip()
+                        if t == ff.answer:
+                            await o.click()
+                            found = True
+                            break
+                    if not found:
+                        await page.keyboard.press("Escape")
+
+            # small pause between fields, same reasoning as the Google Forms
+            # filler: client-side validation does not love many fields
+            # changing in the same tick
+            await asyncio.sleep(0.25)
+
+        except Exception as e:
+            log.warning(f"Couldn't fill Microsoft Form field {ff.index} ({ff.question[:40]}): {e}")
+            continue
+
+
 # ── Orchestration ─────────────────────────────────────────────────────────
 
 async def run_autofill(
@@ -275,9 +428,15 @@ async def run_autofill(
     resume_parsed: Dict,
     job_parsed: Optional[Dict],
     extra_context: str = "",
+    knowledge_graph: Optional[Dict] = None,
 ) -> Dict[str, Any]:
-    if not is_google_form_url(form_url):
-        raise ValueError("That doesn't look like a Google Forms URL (expected docs.google.com/forms/...)")
+    is_google = is_google_form_url(form_url)
+    is_microsoft = is_microsoft_form_url(form_url)
+    if not is_google and not is_microsoft:
+        raise ValueError(
+            "That doesn't look like a Google Forms or Microsoft Forms link "
+            "(expected a docs.google.com/forms/... or forms.office.com/... URL)."
+        )
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -293,7 +452,7 @@ async def run_autofill(
             if no_responses:
                 raise ValueError("This form is no longer accepting responses.")
 
-            scraped = await scrape_google_form(page)
+            scraped = await scrape_google_form(page) if is_google else await scrape_microsoft_form(page)
             fields: List[FormField] = scraped["fields"]
 
             if not fields:
@@ -302,8 +461,13 @@ async def run_autofill(
                     "It might be using a layout this tool doesn't recognize yet."
                 )
 
-            filled = await get_answers_for_fields(fields, resume_parsed, job_parsed, extra_context)
-            await fill_google_form(page, filled)
+            filled = await get_answers_for_fields(
+                fields, resume_parsed, job_parsed, extra_context, knowledge_graph
+            )
+            if is_google:
+                await fill_google_form(page, filled)
+            else:
+                await fill_microsoft_form(page, filled)
 
             await asyncio.sleep(0.5)
             screenshot_bytes = await page.screenshot(full_page=True)

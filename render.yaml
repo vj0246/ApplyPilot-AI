@@ -1,0 +1,41 @@
+# Render blueprint — backend only. Frontend lives on Vercel, database is
+# external Postgres (Neon or similar), so this deploys exactly one service:
+# the FastAPI backend as a Docker web service (Docker because Playwright
+# needs its Chromium binary and OS libraries baked into the image).
+#
+# After connecting the repo in Render, set these three env vars in the
+# dashboard (all marked sync: false below so they never land in git):
+#
+#   DATABASE_URL   postgresql+asyncpg://USER:PASS@HOST/DB?ssl=require
+#                  note the +asyncpg driver and ?ssl=require — asyncpg
+#                  rejects the libpq-style ?sslmode=require spelling
+#   GROQ_API_KEY   from console.groq.com
+#   SECRET_KEY     one strong random value, set once and never rotated —
+#                  user SMTP passwords are encrypted with a key derived
+#                  from it, rotating it locks every user out of sending
+#                  until they re-enter their app password
+#   FRONTEND_URL   https://your-app.vercel.app  (exact origin, no trailing
+#                  slash — this is what CORS allows)
+
+services:
+  - type: web
+    name: applypilot-backend
+    runtime: docker
+    rootDir: backend
+    plan: standard   # Playwright + Chromium OOM on 512MB; 2GB is the safe floor
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: ENVIRONMENT
+        value: production
+      - key: UPLOAD_DIR
+        value: /app/uploads

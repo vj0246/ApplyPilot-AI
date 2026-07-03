@@ -2,13 +2,31 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List, Optional
+from typing import Dict, List, Optional
 
+from app.core import crypto
 from app.core.database import get_db
 from app.models import Profile, User
 from app.routers.auth import get_current_user
+from app.services import ai_service
 
 router = APIRouter(prefix="/profile", tags=["profile"])
+
+
+# A short, fixed interview used to build the knowledge graph. Not meant to
+# feel like a form, meant to surface the kind of concrete, personal detail
+# that makes a form answer or an email sound like one particular human
+# wrote it instead of anyone with a similar resume.
+KNOWLEDGE_GRAPH_QUESTIONS = [
+    "How would you describe yourself to someone who has never met you?",
+    "What is a piece of work you are genuinely proud of, and why does it matter to you?",
+    "What kind of problems do you enjoy solving most, and why those?",
+    "What do you value most in a team or a workplace?",
+    "Describe a time you overcame a real setback. What did you learn?",
+    "What drives you to keep doing this kind of work?",
+    "How do people who work closely with you tend to describe you?",
+    "What are you working toward over the next few years?",
+]
 
 
 class ProfileIn(BaseModel):
@@ -25,6 +43,18 @@ class ProfileIn(BaseModel):
     tone_preference: Optional[str] = None
     skills: Optional[List[str]] = None
     onboarding_done: Optional[bool] = None
+
+
+class KnowledgeGraphIn(BaseModel):
+    answers: List[Dict[str, str]]  # [{"question": "...", "answer": "..."}]
+
+
+class EmailCredentialsIn(BaseModel):
+    sender_email: str
+    smtp_host: str
+    smtp_port: int = 587
+    smtp_username: str
+    smtp_password: str
 
 
 def _out(p: Profile) -> dict:
@@ -44,8 +74,19 @@ def _out(p: Profile) -> dict:
         "tone_preference": p.tone_preference or "professional",
         "skills": p.skills or [],
         "onboarding_done": p.onboarding_done,
+        "knowledge_graph": p.knowledge_graph or {},
+        "email_account_configured": bool(p.smtp_password_encrypted),
+        "sender_email": p.sender_email,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
+
+
+async def _get_profile(u: User, db: AsyncSession) -> Profile:
+    res = await db.execute(select(Profile).where(Profile.user_id == u.id))
+    p = res.scalar_one_or_none()
+    if not p:
+        raise HTTPException(404, "Profile not found")
+    return p
 
 
 @router.get("/")
@@ -53,10 +94,7 @@ async def get_profile(
     u: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    res = await db.execute(select(Profile).where(Profile.user_id == u.id))
-    p = res.scalar_one_or_none()
-    if not p:
-        raise HTTPException(404, "Profile not found")
+    p = await _get_profile(u, db)
     return _out(p)
 
 
@@ -66,10 +104,7 @@ async def update_profile(
     u: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    res = await db.execute(select(Profile).where(Profile.user_id == u.id))
-    p = res.scalar_one_or_none()
-    if not p:
-        raise HTTPException(404, "Profile not found")
+    p = await _get_profile(u, db)
 
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(p, field, value)
@@ -77,3 +112,56 @@ async def update_profile(
     await db.commit()
     await db.refresh(p)
     return _out(p)
+
+
+@router.get("/knowledge-graph/questions")
+async def get_knowledge_graph_questions():
+    return {"questions": KNOWLEDGE_GRAPH_QUESTIONS}
+
+
+@router.post("/knowledge-graph")
+async def build_knowledge_graph(
+    body: KnowledgeGraphIn,
+    u: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not body.answers:
+        raise HTTPException(422, "Answer at least one question so there is something to build from.")
+
+    p = await _get_profile(u, db)
+    new_fragment = await ai_service.build_knowledge_graph(body.answers)
+    p.knowledge_graph = ai_service.merge_knowledge_graph(p.knowledge_graph, new_fragment)
+    await db.commit()
+    await db.refresh(p)
+    return {"knowledge_graph": p.knowledge_graph}
+
+
+@router.patch("/email-credentials")
+async def set_email_credentials(
+    body: EmailCredentialsIn,
+    u: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    p = await _get_profile(u, db)
+    p.sender_email = body.sender_email
+    p.smtp_host = body.smtp_host
+    p.smtp_port = body.smtp_port
+    p.smtp_username = body.smtp_username
+    p.smtp_password_encrypted = crypto.encrypt(body.smtp_password)
+    await db.commit()
+    return {"email_account_configured": True, "sender_email": p.sender_email}
+
+
+@router.delete("/email-credentials")
+async def clear_email_credentials(
+    u: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    p = await _get_profile(u, db)
+    p.sender_email = None
+    p.smtp_host = None
+    p.smtp_port = None
+    p.smtp_username = None
+    p.smtp_password_encrypted = None
+    await db.commit()
+    return {"email_account_configured": False}

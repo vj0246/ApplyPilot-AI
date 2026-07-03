@@ -44,6 +44,22 @@ class Profile(Base):
     tone_preference: Mapped[str] = mapped_column(String(50), default="professional")
     skills: Mapped[List[str]] = mapped_column(ARRAY(Text), default=list)
     onboarding_done: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Structured facts about the person, built from their own answers to a
+    # personality and background interview. Read back into every form
+    # answer and email so the writing is grounded in who they actually are.
+    knowledge_graph: Mapped[Optional[dict]] = mapped_column(JSONB, default=dict)
+
+    # The user's own mailbox, used to send the job application email as
+    # them, not as this app. smtp_password_encrypted is a Fernet token, the
+    # plain app password is never stored and never leaves this column
+    # decrypted except in memory for the single send call.
+    sender_email: Mapped[Optional[str]] = mapped_column(String(320))
+    smtp_host: Mapped[Optional[str]] = mapped_column(String(255))
+    smtp_port: Mapped[Optional[int]] = mapped_column(Integer)
+    smtp_username: Mapped[Optional[str]] = mapped_column(String(320))
+    smtp_password_encrypted: Mapped[Optional[str]] = mapped_column(Text)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -144,5 +160,27 @@ class AutofillRun(Base):
     status: Mapped[str] = mapped_column(String(50), default="running")
     result: Mapped[Optional[dict]] = mapped_column(JSONB)
     error_msg: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class EmailSend(Base):
+    """The application email that goes out from the user's own address about
+    a job description. Split into a draft step and a separate send step on
+    purpose, same human in the loop rule as AutofillRun: the AI writes it,
+    a person can edit it, and only the explicit send call puts it on the
+    wire."""
+    __tablename__ = "email_sends"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    job_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("jobs.id"))
+    resume_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("resumes.id"))
+    recipient_email: Mapped[str] = mapped_column(String(320))
+    subject: Mapped[str] = mapped_column(String(500), default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(50), default="draft")
+    error_msg: Mapped[Optional[str]] = mapped_column(Text)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

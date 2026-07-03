@@ -5,6 +5,17 @@ export interface User {
   created_at: string;
 }
 
+export interface KnowledgeGraph {
+  identity?: string;
+  values?: string[];
+  strengths?: string[];
+  motivations?: string[];
+  work_style?: string[];
+  achievements?: { title: string; summary: string }[];
+  goals?: string[];
+  communication_style?: string;
+}
+
 export interface Profile {
   id: string;
   user_id: string;
@@ -21,7 +32,23 @@ export interface Profile {
   tone_preference: string;
   skills: string[];
   onboarding_done: boolean;
+  knowledge_graph?: KnowledgeGraph;
+  email_account_configured?: boolean;
+  sender_email?: string;
   updated_at?: string;
+}
+
+export type EmailSendStatus = "draft" | "sent" | "failed";
+
+export interface EmailSend {
+  id: string;
+  status: EmailSendStatus;
+  recipient_email: string;
+  subject: string;
+  body: string;
+  error?: string;
+  sent_at?: string;
+  created_at: string;
 }
 
 export interface Resume {

@@ -1,8 +1,12 @@
 """
 autofill.py
 -----------
-   POST /autofill/google-form   { form_url, resume_id, job_id? } -> 202, { id }
-   GET  /autofill/{id}          -> { status, result }   (frontend polls)
+   POST /autofill/form   { form_url, resume_id, job_id? } -> 202, { id }
+   GET  /autofill/{id}   -> { status, result }   (frontend polls)
+
+Accepts a Google Forms or a Microsoft Forms link — autofill_service picks
+the right scraper based on the URL, everything else about the flow is
+identical.
 
 Runs are stored in autofill_runs, same create-row-then-202-then-poll
 pattern as resumes/jobs/applications. Used to be an in-memory dict in this
@@ -20,10 +24,11 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, AsyncSessionLocal
-from app.models import AutofillRun, Job, Resume, User
+from app.models import AutofillRun, Job, Profile, Resume, User
 from app.routers.auth import get_current_user
 from app.services import autofill_service
 
@@ -46,15 +51,19 @@ def _out(run: AutofillRun) -> dict:
     }
 
 
-@router.post("/google-form", status_code=202)
+@router.post("/form", status_code=202)
 async def start_autofill(
     body: AutofillIn,
     bg: BackgroundTasks,
     u: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if "docs.google.com/forms" not in body.form_url:
-        raise HTTPException(422, "That doesn't look like a Google Forms link (expected a docs.google.com/forms/... URL).")
+    if not autofill_service.is_supported_form_url(body.form_url):
+        raise HTTPException(
+            422,
+            "That doesn't look like a Google Forms or Microsoft Forms link "
+            "(expected a docs.google.com/forms/... or forms.office.com/... URL).",
+        )
 
     resume = await db.get(Resume, uuid.UUID(body.resume_id))
     if not resume or resume.user_id != u.id:
@@ -97,12 +106,17 @@ async def _run(run_id: str, form_url: str, extra_context: str):
             if job:
                 job_parsed = job.parsed_data
 
+        res = await db.execute(select(Profile).where(Profile.user_id == run.user_id))
+        profile = res.scalar_one_or_none()
+        knowledge_graph = (profile.knowledge_graph if profile else None) or None
+
         try:
             result = await autofill_service.run_autofill(
                 form_url=form_url,
                 resume_parsed=resume.parsed_data or {} if resume else {},
                 job_parsed=job_parsed,
                 extra_context=extra_context,
+                knowledge_graph=knowledge_graph,
             )
             run.status = "ready"
             run.result = result

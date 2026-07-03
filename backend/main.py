@@ -7,7 +7,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
-from app.routers import auth, profile, resumes, jobs, applications, autofill
+from app.routers import auth, profile, resumes, jobs, applications, autofill, email
 
 
 @asynccontextmanager
@@ -43,6 +43,7 @@ app.include_router(resumes.router,      prefix="/api/v1")
 app.include_router(jobs.router,         prefix="/api/v1")
 app.include_router(applications.router, prefix="/api/v1")
 app.include_router(autofill.router,     prefix="/api/v1")
+app.include_router(email.router,        prefix="/api/v1")
 
 # ── Health ────────────────────────────────────────────────────
 @app.get("/health", include_in_schema=False)

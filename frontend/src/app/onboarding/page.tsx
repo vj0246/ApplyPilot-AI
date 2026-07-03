@@ -1,0 +1,304 @@
+"use client";
+import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useDropzone } from "react-dropzone";
+import toast from "react-hot-toast";
+import {
+  Upload, FileText, Loader2, CheckCircle2, BrainCircuit, Mail, Zap, ArrowRight,
+} from "lucide-react";
+import { resumeApi, profileApi } from "@/lib/api";
+import { Card, Textarea } from "@/components/ui";
+import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/store/auth";
+
+const STEPS = ["Resume", "Knowledge graph", "Email account"] as const;
+
+export default function OnboardingPage() {
+  const router = useRouter();
+  const qc = useQueryClient();
+  const { user } = useAuthStore();
+  const [step, setStep] = useState(0);
+
+  useEffect(() => {
+    const token = typeof window !== "undefined" ? sessionStorage.getItem("ap_token") : null;
+    if (!token) router.push("/auth/login");
+  }, [router]);
+
+  // ── Step 1: resume ──────────────────────────────────────────────
+  const [uploading, setUploading] = useState(false);
+  const { data: resumesData } = useQuery({
+    queryKey: ["resumes"],
+    queryFn: () => resumeApi.list().then(r => r.data),
+    refetchInterval: (q) => (q.state.data?.items || []).some((r: any) => r.status === "processing") ? 2000 : false,
+  });
+  const resumes = resumesData?.items || [];
+  const hasReadyResume = resumes.some((r: any) => r.status === "ready");
+
+  const onDrop = useCallback(async (files: File[]) => {
+    if (!files[0]) return;
+    setUploading(true);
+    try {
+      await resumeApi.upload(files[0]);
+      toast.success("Uploaded, reading your resume now");
+      qc.invalidateQueries({ queryKey: ["resumes"] });
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }, [qc]);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: {
+      "application/pdf": [".pdf"],
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+      "text/plain": [".txt"],
+    },
+    maxSize: 10 * 1024 * 1024,
+    multiple: false,
+  });
+
+  // ── Step 2: knowledge graph ──────────────────────────────────────
+  const { data: kgQuestions } = useQuery({
+    queryKey: ["knowledge-graph-questions"],
+    queryFn: () => profileApi.knowledgeGraphQuestions().then(r => r.data.questions as string[]),
+  });
+  const [kgAnswers, setKgAnswers] = useState<Record<string, string>>({});
+  const [kgBuilt, setKgBuilt] = useState(false);
+
+  const buildGraphMut = useMutation({
+    mutationFn: () =>
+      profileApi.buildKnowledgeGraph(
+        Object.entries(kgAnswers)
+          .filter(([, answer]) => answer.trim())
+          .map(([question, answer]) => ({ question, answer }))
+      ),
+    onSuccess: () => { setKgBuilt(true); toast.success("Knowledge graph built"); },
+    onError: (err: any) => toast.error(err.response?.data?.detail || "Could not build the knowledge graph"),
+  });
+
+  // ── Step 3: email account ────────────────────────────────────────
+  const [emailForm, setEmailForm] = useState({
+    sender_email: "", smtp_host: "smtp.gmail.com", smtp_port: 587,
+    smtp_username: "", smtp_password: "",
+  });
+  const [emailConnected, setEmailConnected] = useState(false);
+
+  const saveEmailMut = useMutation({
+    mutationFn: () => profileApi.setEmailCredentials(emailForm),
+    onSuccess: () => { setEmailConnected(true); toast.success("Email account connected"); },
+    onError: (err: any) => toast.error(err.response?.data?.detail || "Could not save email account"),
+  });
+
+  // ── Finish ────────────────────────────────────────────────────────
+  const finishMut = useMutation({
+    mutationFn: () => profileApi.update({ onboarding_done: true }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["profile"] }); router.push("/dashboard"); },
+  });
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-xl">
+        <div className="text-center mb-6">
+          <div className="w-9 h-9 bg-indigo-600 rounded-lg flex items-center justify-center mx-auto mb-3">
+            <Zap className="w-4.5 h-4.5 text-white" />
+          </div>
+          <h1 className="text-xl font-bold text-gray-900">
+            Welcome{user?.full_name ? `, ${user.full_name}` : ""}
+          </h1>
+          <p className="text-gray-500 text-sm mt-1">
+            A few things first, then everything else in this tool gets grounded in your real background.
+          </p>
+        </div>
+
+        <div className="flex items-center justify-center gap-2 mb-6">
+          {STEPS.map((label, i) => (
+            <div key={label} className={cn(
+              "flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full",
+              i === step ? "bg-indigo-600 text-white" : i < step ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-400"
+            )}>
+              {i < step && <CheckCircle2 className="w-3 h-3" />}
+              {label}
+            </div>
+          ))}
+        </div>
+
+        {step === 0 && (
+          <Card className="space-y-5">
+            <div>
+              <h2 className="font-semibold text-gray-900 flex items-center gap-2"><FileText className="w-4 h-4" /> Upload your resume</h2>
+              <p className="text-sm text-gray-500 mt-1">This is read once and turned into your profile, experience, skills, and education.</p>
+            </div>
+
+            <div
+              {...getRootProps()}
+              className={cn(
+                "border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all",
+                isDragActive ? "border-indigo-400 bg-indigo-50" : "border-gray-200 hover:border-gray-300 hover:bg-gray-50",
+                uploading && "opacity-60 pointer-events-none"
+              )}
+            >
+              <input {...getInputProps()} />
+              <div className="flex flex-col items-center gap-2">
+                {uploading ? <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /> : <Upload className="w-8 h-8 text-indigo-400" />}
+                <p className="font-medium text-gray-900 text-sm">
+                  {uploading ? "Uploading" : hasReadyResume ? "Resume ready, drop another to replace" : "Drag and drop your resume"}
+                </p>
+                <p className="text-gray-500 text-xs">PDF, DOCX, or TXT, up to 10 megabytes</p>
+              </div>
+            </div>
+
+            {resumes.some((r: any) => r.status === "processing") && (
+              <p className="text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Reading your resume</p>
+            )}
+
+            <button
+              onClick={() => setStep(1)}
+              disabled={!hasReadyResume}
+              className="btn-primary w-full justify-center py-2.5"
+            >
+              Continue <ArrowRight className="w-4 h-4" />
+            </button>
+          </Card>
+        )}
+
+        {step === 1 && (
+          <Card className="space-y-5">
+            <div>
+              <h2 className="font-semibold text-gray-900 flex items-center gap-2"><BrainCircuit className="w-4 h-4" /> Tell us about yourself</h2>
+              <p className="text-sm text-gray-500 mt-1">Answer in your own words. This becomes a knowledge graph of your values, strengths, and motivations that every form answer and email is grounded in, not just your resume.</p>
+            </div>
+
+            <div className="space-y-4 max-h-80 overflow-y-auto pr-1">
+              {(kgQuestions || []).map((q) => (
+                <div key={q}>
+                  <label className="label">{q}</label>
+                  <Textarea
+                    value={kgAnswers[q] || ""}
+                    onChange={(e) => setKgAnswers((a) => ({ ...a, [q]: e.target.value }))}
+                    rows={2}
+                  />
+                </div>
+              ))}
+            </div>
+
+            {!kgBuilt ? (
+              <button
+                onClick={() => buildGraphMut.mutate()}
+                disabled={buildGraphMut.isPending || Object.values(kgAnswers).every((v) => !v.trim())}
+                className="btn-primary w-full justify-center py-2.5"
+              >
+                {buildGraphMut.isPending ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Building your knowledge graph</>
+                ) : (
+                  <><BrainCircuit className="w-4 h-4" /> Build knowledge graph</>
+                )}
+              </button>
+            ) : (
+              <button onClick={() => setStep(2)} className="btn-primary w-full justify-center py-2.5">
+                Continue <ArrowRight className="w-4 h-4" />
+              </button>
+            )}
+
+            <button onClick={() => setStep(2)} className="text-xs text-gray-400 hover:text-gray-600 w-full text-center">
+              Skip for now, answer this later in settings
+            </button>
+          </Card>
+        )}
+
+        {step === 2 && (
+          <Card className="space-y-5">
+            <div>
+              <h2 className="font-semibold text-gray-900 flex items-center gap-2"><Mail className="w-4 h-4" /> Connect your email</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Optional, needed only if you want this tool to send the application email from your own
+                address. Use an app password, never your real account password. On Gmail, turn on two
+                factor authentication and create an app password under your Google account security
+                settings.
+              </p>
+            </div>
+
+            {!emailConnected ? (
+              <>
+                <div>
+                  <label className="label">Your email address</label>
+                  <input
+                    value={emailForm.sender_email}
+                    onChange={(e) => setEmailForm((f) => ({ ...f, sender_email: e.target.value }))}
+                    placeholder="you@gmail.com"
+                    className="input"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="label">SMTP server</label>
+                    <input
+                      value={emailForm.smtp_host}
+                      onChange={(e) => setEmailForm((f) => ({ ...f, smtp_host: e.target.value }))}
+                      className="input"
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Port</label>
+                    <input
+                      type="number"
+                      value={emailForm.smtp_port}
+                      onChange={(e) => setEmailForm((f) => ({ ...f, smtp_port: Number(e.target.value) }))}
+                      className="input"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="label">Username</label>
+                  <input
+                    value={emailForm.smtp_username}
+                    onChange={(e) => setEmailForm((f) => ({ ...f, smtp_username: e.target.value }))}
+                    placeholder="Usually the same as your email address"
+                    className="input"
+                  />
+                </div>
+                <div>
+                  <label className="label">App password</label>
+                  <input
+                    type="password"
+                    value={emailForm.smtp_password}
+                    onChange={(e) => setEmailForm((f) => ({ ...f, smtp_password: e.target.value }))}
+                    placeholder="Stored only in encrypted form"
+                    className="input"
+                  />
+                </div>
+                <button
+                  onClick={() => saveEmailMut.mutate()}
+                  disabled={saveEmailMut.isPending || !emailForm.sender_email || !emailForm.smtp_password}
+                  className="btn-primary w-full justify-center py-2.5"
+                >
+                  {saveEmailMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Connect account"}
+                </button>
+              </>
+            ) : (
+              <p className="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-lg flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4" /> Connected as {emailForm.sender_email}
+              </p>
+            )}
+
+            <button
+              onClick={() => finishMut.mutate()}
+              disabled={finishMut.isPending}
+              className="btn-primary w-full justify-center py-2.5"
+            >
+              {finishMut.isPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : emailConnected ? (
+                "Finish, take me to the dashboard"
+              ) : (
+                "Skip for now, take me to the dashboard"
+              )}
+            </button>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -28,6 +28,9 @@ services:
       dockerfile: Dockerfile
     container_name: ap_backend
     restart: unless-stopped
+    # Dockerfile CMD is production (no --reload); this override keeps hot
+    # reload for local dev, where ./backend is bind-mounted below.
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-applypilot}:${POSTGRES_PASSWORD:-applypilot}@db:5432/${POSTGRES_DB:-applypilot}

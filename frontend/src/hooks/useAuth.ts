@@ -18,7 +18,7 @@ export function useAuth() {
   const register = useCallback(async (email: string, password: string, full_name: string) => {
     const { data } = await api.post("/auth/register", { email, password, full_name });
     setAuth(data.user, data.access_token);
-    router.push("/dashboard");
+    router.push("/onboarding");
   }, [router, setAuth]);
 
   const logout = useCallback(() => {

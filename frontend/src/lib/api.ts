@@ -45,6 +45,14 @@ export const authApi = {
 export const profileApi = {
   get: () => api.get("/profile/"),
   update: (d: Record<string, unknown>) => api.patch("/profile/", d),
+  knowledgeGraphQuestions: () => api.get("/profile/knowledge-graph/questions"),
+  buildKnowledgeGraph: (answers: { question: string; answer: string }[]) =>
+    api.post("/profile/knowledge-graph", { answers }, { timeout: 60_000 }),
+  setEmailCredentials: (d: {
+    sender_email: string; smtp_host: string; smtp_port: number;
+    smtp_username: string; smtp_password: string;
+  }) => api.patch("/profile/email-credentials", d),
+  clearEmailCredentials: () => api.delete("/profile/email-credentials"),
 };
 
 // ── Resumes ───────────────────────────────────────────────────────
@@ -86,11 +94,22 @@ export const appApi = {
   delete: (id: string) => api.delete(`/applications/${id}`),
 };
 
-// ── Google Form Autofill ────────────────────────────────────────────
+// ── Form Autofill (Google Forms and Microsoft Forms) ────────────────
 // Fills the real form, stops before submit — you review and click
-// submit yourself inside the actual Google Form tab.
+// submit yourself inside the actual form tab.
 export const autofillApi = {
   start: (d: { form_url: string; resume_id: string; job_id?: string; extra_context?: string }) =>
-    api.post("/autofill/google-form", d, { timeout: 90_000 }),
+    api.post("/autofill/form", d, { timeout: 90_000 }),
   get: (id: string) => api.get(`/autofill/${id}`),
+};
+
+// ── Application email ────────────────────────────────────────────────
+// Drafts the email from a job description, a person can edit it, and the
+// send call is separate and explicit — nothing goes out on its own.
+export const emailApi = {
+  draft: (d: { job_id: string; resume_id: string; recipient_email: string; extra_context?: string }) =>
+    api.post("/email/draft", d, { timeout: 60_000 }),
+  get: (id: string) => api.get(`/email/${id}`),
+  update: (id: string, d: { subject?: string; body?: string }) => api.patch(`/email/${id}`, d),
+  send: (id: string) => api.post(`/email/${id}/send`),
 };

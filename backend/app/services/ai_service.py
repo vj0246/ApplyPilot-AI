@@ -25,6 +25,19 @@ from app.core.config import settings
 log = logging.getLogger(__name__)
 
 
+# Appended to every system prompt that produces text a real person will read
+# or that goes out under the user's name (cover letters, emails, form
+# answers, the knowledge graph summary). Kept as one shared block so the
+# voice stays consistent no matter which function is writing.
+WRITING_STANDARDS = """
+Writing standards, follow every one of these without exception:
+1. Write like a real, high impact human, not like an AI and not like a template.
+2. Never use an abbreviation or an acronym. Spell every word and phrase out in full. Write "for example" instead of "e.g.", "and so on" instead of "etc.", "artificial intelligence" instead of "AI", "United States" instead of "US", "application" instead of "app".
+3. Never use a hyphen or a dash of any kind, anywhere, including inside compound words. If a word would normally be hyphenated, either join it into one word or rewrite the phrase with "to" or a comma instead.
+4. Be concrete and specific. Every sentence should earn its place and say something a generic answer could not say.
+"""
+
+
 def _client() -> AsyncGroq:
     # not built at import time on purpose — if there's no key yet (normal
     # right after cloning), we want the failure to happen when someone
@@ -345,7 +358,7 @@ Writing rules (follow strictly):
 7. Total length: 180–240 words
 8. Tone: {tone}
 9. Sound human — vary sentence length, include one specific detail that shows you did your homework
-
+{WRITING_STANDARDS}
 Return ONLY the letter body. No subject line, no "Dear Hiring Manager" header, no sign-off."""
 
     prompt = f"""Write a cover letter for this candidate:
@@ -375,8 +388,8 @@ def _fallback_cover_letter(name: str, job: Dict, fit: Dict) -> str:
     return (
         f"The {t} role at {c} stands out to me because it aligns precisely "
         f"with the work I've been building toward.\n\n"
-        f"With hands-on experience in {sk}, I've built a track record of delivering "
-        f"meaningful results in fast-moving environments. I combine technical depth "
+        f"With hands on experience in {sk}, I've built a track record of delivering "
+        f"meaningful results in fast moving environments. I combine technical depth "
         f"with the communication skills to turn complex work into clear outcomes.\n\n"
         f"I'd welcome the chance to talk through what you're building and how I can "
         f"contribute from day one.\n\nBest,\n{name}"
@@ -390,37 +403,60 @@ async def generate_email(
     job_parsed: Dict,
     fit: Dict,
     extra_context: str = "",
+    knowledge_graph: Optional[Dict] = None,
 ) -> Dict[str, str]:
-    job_title = job_parsed.get("title", "the role")
-    company   = job_parsed.get("company", "the company")
-    top_skill = list(fit.get("matched_skills", []))[:1]
+    job_title    = job_parsed.get("title", "the role")
+    company      = job_parsed.get("company", "the company")
+    matched      = ", ".join(list(fit.get("matched_skills", []))[:6])
+    top_skill    = list(fit.get("matched_skills", []))[:1]
     top_skill_str = top_skill[0] if top_skill else "relevant experience"
+    responsibilities = ", ".join((job_parsed.get("responsibilities") or [])[:5])
+    required_skills  = ", ".join((job_parsed.get("required_skills") or [])[:8])
+    culture      = ", ".join((job_parsed.get("culture") or [])[:3])
+    fit_pct      = fit.get("overall", 75)
+    graph_context = _knowledge_graph_context(knowledge_graph)
 
-    system = """You are a professional email writer. Write short, direct emails that get responses.
-Rules:
-- Subject: clear and specific — format: "Application: [Role Title] — [Full Name]"
-- Body: 3-4 sentences only. Specific, confident, no fluff.
-- Do NOT say "I hope this email finds you well"
-- Mention one specific, concrete achievement or skill
-- End with a clear next step
-Return JSON: {"subject": "...", "body": "..."}"""
+    system = f"""You are a senior professional job email writer with deep experience getting candidates
+interviews at competitive companies. Every email you write is read closely against the exact job
+description it responds to, so it must be tightly and visibly aligned with what that role actually
+asks for, not a generic application anyone could send.
 
-    prompt = f"""Write an application email.
+Non negotiable rules:
+1. Read the required skills and responsibilities given below and mirror the two or three that matter
+   most, using the candidate's real matched skills and fit, never a skill they do not have
+2. Subject line format: "Application for [Role Title], [Full Name]"
+3. Body: 3 to 4 sentences only, no filler, every sentence must connect a real fact about the
+   candidate to something specific this job actually asks for
+4. Do not say "I hope this email finds you well" or any other empty opener
+5. Sound like a real, thoughtful, confident professional wrote this personally for this one role,
+   never like a template that got the company name swapped in
+6. End with a clear, specific next step
+{WRITING_STANDARDS}
+Return JSON: {{"subject": "...", "body": "..."}}"""
+
+    prompt = f"""Write an application email about this exact job description, sent on the candidate's
+behalf to a recipient at the company.
+
 Candidate: {name}
 Role: {job_title} at {company}
-Key strength: {top_skill_str}
-Extra context: {extra_context}"""
+Fit score against this job description: {fit_pct:.0f} out of 100
+Candidate's matched skills for this job description: {matched or top_skill_str}
+This job description's required skills: {required_skills}
+This job description's key responsibilities: {responsibilities}
+This company's culture signals: {culture}
+{graph_context}
+Extra context from the candidate: {extra_context}"""
 
     result = await _json_chat(prompt, system)
     if result and result.get("subject"):
         return result
 
     return {
-        "subject": f"Application: {job_title} — {name}",
+        "subject": f"Application for {job_title}, {name}",
         "body": (
             f"Hi,\n\n"
             f"I'm writing to apply for the {job_title} position at {company}. "
-            f"My background in {top_skill_str} is a direct match for what you've described — "
+            f"My background in {top_skill_str} is a direct match for what you've described. "
             f"I've applied this in production settings with measurable results.\n\n"
             f"I've attached my resume and cover letter. "
             f"I'd be glad to jump on a quick call to discuss.\n\n"
@@ -429,15 +465,108 @@ Extra context: {extra_context}"""
     }
 
 
+# ── Knowledge graph ──────────────────────────────────────────────────────
+# Built once from a short personality and background interview (see
+# app/routers/profile.py for the question set), then read back into every
+# form answer and email so the AI is grounded in who the candidate actually
+# is, not just what a resume happens to list. Stored as one structured JSON
+# object on the profile rather than a real graph database — for the depth
+# this app needs, a flat set of labeled facts is enough, and it stays a
+# single readable object instead of a node and edge store to maintain.
+
+async def build_knowledge_graph(qa_pairs: List[Dict[str, str]]) -> Dict[str, Any]:
+    system = f"""You are building a structured knowledge graph of a person from their own answers to
+personality and background questions. Read every answer carefully and extract what is really
+there, do not invent anything that was not said or clearly implied.
+
+Return ONLY this JSON structure:
+{{
+  "identity": "one sentence describing who this person is professionally",
+  "values": ["a value that clearly matters to them"],
+  "strengths": ["a genuine strength, backed by something they said"],
+  "motivations": ["what actually drives them, in their own framing"],
+  "work_style": ["how they operate day to day"],
+  "achievements": [{{"title": "short label", "summary": "what happened and why it mattered"}}],
+  "goals": ["a stated or clearly implied goal"],
+  "communication_style": "a short description of how they naturally express themselves"
+}}
+{WRITING_STANDARDS}"""
+
+    qa_formatted = "\n\n".join(f"Question: {p.get('question','')}\nAnswer: {p.get('answer','')}" for p in qa_pairs)
+    result = await _json_chat(f"Build the knowledge graph from these answers:\n\n{qa_formatted}", system)
+    return result if result else {
+        "identity": "", "values": [], "strengths": [], "motivations": [],
+        "work_style": [], "achievements": [], "goals": [], "communication_style": "",
+    }
+
+
+def merge_knowledge_graph(old: Optional[Dict], new: Dict) -> Dict:
+    # Answering the questionnaire again should grow someone's memory, not
+    # wipe it. List fields union and dedupe case insensitively, achievements
+    # dedupe by title, and the two single sentence fields only get replaced
+    # when the new answer actually said something.
+    old = old or {}
+
+    def _merge_list(key: str) -> List[str]:
+        seen: Dict[str, str] = {}
+        for value in (old.get(key) or []) + (new.get(key) or []):
+            if value and value.strip():
+                seen[value.strip().lower()] = value.strip()
+        return list(seen.values())
+
+    merged_achievements: Dict[str, Dict[str, str]] = {}
+    for a in (old.get("achievements") or []) + (new.get("achievements") or []):
+        title = (a.get("title") or "").strip()
+        if title:
+            merged_achievements[title.lower()] = a
+
+    return {
+        "identity": new.get("identity") or old.get("identity") or "",
+        "values": _merge_list("values"),
+        "strengths": _merge_list("strengths"),
+        "motivations": _merge_list("motivations"),
+        "work_style": _merge_list("work_style"),
+        "achievements": list(merged_achievements.values()),
+        "goals": _merge_list("goals"),
+        "communication_style": new.get("communication_style") or old.get("communication_style") or "",
+    }
+
+
+def _knowledge_graph_context(knowledge_graph: Optional[Dict]) -> str:
+    if not knowledge_graph:
+        return ""
+    g = knowledge_graph
+    lines = []
+    if g.get("identity"):
+        lines.append(f"Who they are: {g['identity']}")
+    if g.get("values"):
+        lines.append(f"What they value: {', '.join(g['values'][:5])}")
+    if g.get("strengths"):
+        lines.append(f"Genuine strengths: {', '.join(g['strengths'][:5])}")
+    if g.get("motivations"):
+        lines.append(f"What drives them: {', '.join(g['motivations'][:3])}")
+    if g.get("work_style"):
+        lines.append(f"How they work: {', '.join(g['work_style'][:3])}")
+    if g.get("achievements"):
+        top = g["achievements"][:2]
+        lines.append("Personal stories: " + "; ".join(f"{a.get('title','')}, {a.get('summary','')}" for a in top))
+    if g.get("goals"):
+        lines.append(f"What they are working toward: {', '.join(g['goals'][:3])}")
+    if g.get("communication_style"):
+        lines.append(f"How they naturally speak: {g['communication_style']}")
+    return "Knowledge graph of the candidate as a person, drawn from their own words:\n" + "\n".join(lines) if lines else ""
+
+
 # ── Form question answers ────────────────────────────────────────────────
-# Same function the Google Form autofill engine calls — one prompt to
-# maintain instead of two near-identical ones.
+# Same function the Google Form and Microsoft Form autofill engines call —
+# one prompt to maintain instead of two near-identical ones.
 
 async def answer_form_questions(
     questions: List[str],
     resume_parsed: Dict,
     job_parsed: Optional[Dict],
     extra_context: str = "",
+    knowledge_graph: Optional[Dict] = None,
 ) -> List[Dict[str, str]]:
     name     = resume_parsed.get("name", "the applicant")
     exp      = resume_parsed.get("experience", [])
@@ -447,25 +576,29 @@ async def answer_form_questions(
     jt       = (job_parsed or {}).get("title", "this role")
     company  = (job_parsed or {}).get("company", "this company")
     culture  = ", ".join(((job_parsed or {}).get("culture") or [])[:3])
+    graph_context = _knowledge_graph_context(knowledge_graph)
 
-    system = f"""You are helping {name} fill in a job application for {jt} at {company}.
-Write answers that sound like a real, thoughtful human wrote them — not AI-generated.
+    system = f"""You are helping {name} fill in a job application for {jt} at {company}, section by
+section, question by question. You are reading the whole form the way a thoughtful human
+assistant would, not answering each question in isolation.
+Write answers that sound like a real, thoughtful human wrote them, not AI generated.
 
 Grounding facts about {name}:
 - Recent role: {recent}
 - Key achievements: {bullets}
 - Technical skills: {skills}
 - Extra context: {extra_context}
+{graph_context}
 
 Rules for every answer:
-1. Be specific — use real facts from the candidate's background above
-2. Keep answers concise: 2–4 sentences for short questions, 4–6 for long ones
-3. Never use: "I am passionate about", "synergy", "leverage", "hard-working", "team player"
+1. Be specific, use real facts from the candidate's background above
+2. Keep answers concise: 2 to 4 sentences for short questions, 4 to 6 for long ones
+3. Never use: "I am passionate about", "synergy", "leverage", "hard working", "team player"
 4. Sound genuine, confident, and direct
 5. If a question asks about salary, give a reasonable range based on industry norms
-6. For "Why this company?" — reference something specific about {company} (culture: {culture})
-
-Return a JSON array — one object per question:
+6. For "Why this company?", reference something specific about {company} (culture: {culture})
+{WRITING_STANDARDS}
+Return a JSON array, one object per question:
 [{{"question": "...", "answer": "..."}}]"""
 
     qs_formatted = "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions))
@@ -501,16 +634,16 @@ async def adapt_resume_for_job(
     keywords = ", ".join((job_parsed.get("required_skills") or [])[:10])
     missing  = ", ".join(list(fit.get("missing_required") or [])[:5])
 
-    system = """You are an expert resume writer and ATS optimization specialist.
+    system = f"""You are an expert resume writer and ATS optimization specialist.
 
-CRITICAL RULES — never break these:
-1. NEVER invent skills, tools, or experience the candidate hasn't mentioned
+CRITICAL RULES, never break these:
+1. NEVER invent skills, tools, or experience the candidate has not mentioned
 2. NEVER change job titles, company names, dates, or GPAs
 3. ONLY reframe existing bullets to naturally incorporate relevant keywords
 4. Improve weak action verbs (use: Built, Delivered, Reduced, Grew, Shipped, Automated, Led, Designed)
-5. Add metrics where implied but not explicit (e.g., "improved performance" → "improved performance by ~30%") — mark estimated figures with ~
+5. Add metrics where implied but not explicit (for instance, "improved performance" becomes "improved performance by about 30 percent"), mark estimated figures with the word about
 6. Keep the same overall structure and length
-
+{WRITING_STANDARDS}
 Return only the improved resume text."""
 
     prompt = f"""Optimize this resume for the target job.

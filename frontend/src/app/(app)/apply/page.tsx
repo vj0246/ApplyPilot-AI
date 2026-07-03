@@ -5,16 +5,16 @@ import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import {
   Zap, FileText, Briefcase, Loader2, MessageSquare,
-  Sparkles, Copy, Link2, ExternalLink, AlertTriangle, ShieldCheck,
+  Sparkles, Copy, Link2, ExternalLink, AlertTriangle, ShieldCheck, Send, Pencil,
 } from "lucide-react";
-import { resumeApi, jobApi, appApi, autofillApi } from "@/lib/api";
+import { resumeApi, jobApi, appApi, autofillApi, emailApi } from "@/lib/api";
 import { Card, Badge, Textarea } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 export default function ApplyPage() {
   const router = useRouter();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<"generate" | "formfill" | "googleform">("generate");
+  const [tab, setTab] = useState<"generate" | "formfill" | "googleform" | "email">("generate");
 
   // ── Data ──────────────────────────────────────────────────
   const { data: resumesData } = useQuery({
@@ -98,6 +98,46 @@ export default function ApplyPage() {
   const isFailed = runData?.status === "failed";
   const result = runData?.result;
 
+  // ── Application email ─────────────────────────────────────────────
+  const [emailJobId, setEmailJobId] = useState("");
+  const [emailResumeId, setEmailResumeId] = useState("");
+  const [recipientEmail, setRecipientEmail] = useState("");
+  const [emailContext, setEmailContext] = useState("");
+  const [emailDraftId, setEmailDraftId] = useState<string | null>(null);
+
+  const draftEmailMut = useMutation({
+    mutationFn: () => emailApi.draft({
+      job_id: emailJobId,
+      resume_id: emailResumeId || resumeId,
+      recipient_email: recipientEmail.trim(),
+      extra_context: emailContext,
+    }),
+    onSuccess: ({ data }) => { setEmailDraftId(data.id); toast.success("Draft written, review it before sending"); },
+    onError: (err: any) => toast.error(err.response?.data?.detail || "Couldn't draft the email"),
+  });
+
+  const { data: emailDraft } = useQuery({
+    queryKey: ["email", emailDraftId],
+    queryFn: () => emailApi.get(emailDraftId!).then(r => r.data),
+    enabled: !!emailDraftId,
+  });
+
+  const [editedSubject, setEditedSubject] = useState<string | null>(null);
+  const [editedBody, setEditedBody] = useState<string | null>(null);
+  const subjectValue = editedSubject ?? emailDraft?.subject ?? "";
+  const bodyValue = editedBody ?? emailDraft?.body ?? "";
+
+  const saveEditMut = useMutation({
+    mutationFn: () => emailApi.update(emailDraftId!, { subject: subjectValue, body: bodyValue }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["email", emailDraftId] }); toast.success("Draft updated"); },
+  });
+
+  const sendEmailMut = useMutation({
+    mutationFn: () => emailApi.send(emailDraftId!),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["email", emailDraftId] }); toast.success("Email sent from your address"); },
+    onError: (err: any) => toast.error(err.response?.data?.detail || "Could not send the email"),
+  });
+
   const noResume = readyResumes.length === 0;
   const noJob = readyJobs.length === 0;
 
@@ -117,7 +157,10 @@ export default function ApplyPage() {
           Form Question Filler
         </TabBtn>
         <TabBtn active={tab === "googleform"} onClick={() => setTab("googleform")} icon={Link2}>
-          Google Form Autofill
+          Form Autofill
+        </TabBtn>
+        <TabBtn active={tab === "email"} onClick={() => setTab("email")} icon={Send}>
+          Mail the Job Description
         </TabBtn>
       </div>
 
@@ -289,9 +332,10 @@ export default function ApplyPage() {
               <div className="text-sm text-blue-900">
                 <p className="font-medium mb-0.5">We fill it, you submit it</p>
                 <p className="text-blue-700">
-                  This opens your Google Form, fills in every field with AI-generated answers
-                  grounded in your resume, and stops. Nothing gets submitted automatically —
-                  you review the filled form and click submit yourself.
+                  This opens your Google Form or Microsoft Form, fills in every field with
+                  answers grounded in your resume and your knowledge graph, and stops. Nothing
+                  gets submitted automatically, you review the filled form and click submit
+                  yourself.
                 </p>
               </div>
             </div>
@@ -299,11 +343,11 @@ export default function ApplyPage() {
 
           <Card className="space-y-5">
             <div>
-              <label className="label flex items-center gap-1.5"><Link2 className="w-3.5 h-3.5" /> Google Form link</label>
+              <label className="label flex items-center gap-1.5"><Link2 className="w-3.5 h-3.5" /> Form link</label>
               <input
                 value={formUrl}
                 onChange={(e) => setFormUrl(e.target.value)}
-                placeholder="https://docs.google.com/forms/d/e/.../viewform"
+                placeholder="https://docs.google.com/forms/d/e/.../viewform or https://forms.office.com/..."
                 className="input"
               />
             </div>
@@ -427,6 +471,154 @@ export default function ApplyPage() {
                 Open the form above to double-check everything, then click Submit yourself inside Google Forms.
                 ApplyPilot never submits on your behalf.
               </p>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {tab === "email" && (
+        <div className="space-y-5">
+          <Card className="bg-blue-50 border-blue-100">
+            <div className="flex gap-3">
+              <ShieldCheck className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+              <div className="text-sm text-blue-900">
+                <p className="font-medium mb-0.5">We draft it, you send it</p>
+                <p className="text-blue-700">
+                  This writes an application email about the job description from your resume
+                  and your knowledge graph. Nothing goes out until you review the draft below,
+                  edit it if you want, and press send. It sends from your own address, connected
+                  in settings under Email Account.
+                </p>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="space-y-5">
+            <div>
+              <label className="label flex items-center gap-1.5"><Briefcase className="w-3.5 h-3.5" /> Job posting</label>
+              {readyJobs.length === 0 ? (
+                <p className="text-sm text-gray-400">No processed jobs available</p>
+              ) : (
+                <select value={emailJobId} onChange={(e) => setEmailJobId(e.target.value)} className="input">
+                  <option value="">Select a job</option>
+                  {readyJobs.map((j: any) => (
+                    <option key={j.id} value={j.id}>{j.title} — {j.company}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            <div>
+              <label className="label flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" /> Resume to use</label>
+              {readyResumes.length === 0 ? (
+                <p className="text-sm text-gray-400">No processed resumes available</p>
+              ) : (
+                <select value={emailResumeId || resumeId} onChange={(e) => setEmailResumeId(e.target.value)} className="input">
+                  {readyResumes.map((r: any) => (
+                    <option key={r.id} value={r.id}>{r.label || r.filename}{r.is_primary ? " (primary)" : ""}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            <div>
+              <label className="label">Recipient email</label>
+              <input
+                value={recipientEmail}
+                onChange={(e) => setRecipientEmail(e.target.value)}
+                placeholder="hiring@company.com"
+                className="input"
+              />
+            </div>
+
+            <div>
+              <label className="label">Extra context <span className="text-gray-400 font-normal">(optional)</span></label>
+              <Textarea
+                value={emailContext}
+                onChange={(e) => setEmailContext(e.target.value)}
+                rows={2}
+                placeholder="Anything specific you want reflected in the email..."
+              />
+            </div>
+
+            <button
+              onClick={() => draftEmailMut.mutate()}
+              disabled={!emailJobId || !recipientEmail.trim() || (!emailResumeId && !resumeId) || draftEmailMut.isPending}
+              className="btn-primary w-full justify-center py-2.5"
+            >
+              {draftEmailMut.isPending ? (
+                <><Loader2 className="w-4 h-4 animate-spin" /> Writing the draft...</>
+              ) : (
+                <><Pencil className="w-4 h-4" /> Draft the email</>
+              )}
+            </button>
+          </Card>
+
+          {emailDraft && (
+            <Card className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="font-semibold text-gray-900">Review before sending</h2>
+                <Badge className={cn(
+                  emailDraft.status === "sent" ? "bg-emerald-50 text-emerald-700" :
+                  emailDraft.status === "failed" ? "bg-red-50 text-red-700" :
+                  "bg-gray-100 text-gray-600"
+                )}>
+                  {emailDraft.status}
+                </Badge>
+              </div>
+
+              <div>
+                <label className="label">Subject</label>
+                <input
+                  value={subjectValue}
+                  onChange={(e) => setEditedSubject(e.target.value)}
+                  disabled={emailDraft.status === "sent"}
+                  className="input"
+                />
+              </div>
+
+              <div>
+                <label className="label">Body</label>
+                <Textarea
+                  value={bodyValue}
+                  onChange={(e) => setEditedBody(e.target.value)}
+                  disabled={emailDraft.status === "sent"}
+                  rows={8}
+                />
+              </div>
+
+              {emailDraft.status === "failed" && emailDraft.error && (
+                <p className="text-sm text-red-700 bg-red-50 p-2 rounded-lg">{emailDraft.error}</p>
+              )}
+
+              {emailDraft.status !== "sent" && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => saveEditMut.mutate()}
+                    disabled={saveEditMut.isPending || (editedSubject === null && editedBody === null)}
+                    className="btn-secondary"
+                  >
+                    Save edits
+                  </button>
+                  <button
+                    onClick={() => sendEmailMut.mutate()}
+                    disabled={sendEmailMut.isPending}
+                    className="btn-primary flex-1 justify-center"
+                  >
+                    {sendEmailMut.isPending ? (
+                      <><Loader2 className="w-4 h-4 animate-spin" /> Sending...</>
+                    ) : (
+                      <><Send className="w-4 h-4" /> Send from my address</>
+                    )}
+                  </button>
+                </div>
+              )}
+
+              {emailDraft.status === "sent" && (
+                <p className="text-sm text-emerald-700 bg-emerald-50 p-2 rounded-lg">
+                  Sent to {emailDraft.recipient_email} on {new Date(emailDraft.sent_at).toLocaleString()}.
+                </p>
+              )}
             </Card>
           )}
         </div>
