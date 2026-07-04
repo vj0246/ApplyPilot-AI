@@ -1,7 +1,7 @@
 """
 email.py
 --------
-   POST /email/draft         { job_id, resume_id, recipient_email, extra_context? } -> 201, draft
+   POST /email/draft         { job_id? or job_description?, resume_id, recipient_email, extra_context? } -> 201, draft
    GET  /email/{id}          -> draft or sent record
    PATCH /email/{id}         { subject?, body? } -> edit before sending
    POST /email/{id}/send     -> actually sends, from the user's own address
@@ -11,13 +11,19 @@ job description and writes the email, a person can read it and change the
 subject or body, and only the explicit send call puts it on the wire. This
 mirrors the autofill router's rule of never submitting anything on the
 user's behalf without them looking at it first.
+
+A draft can point at a job already saved on the Jobs page (job_id), or at
+a job description pasted straight into this flow (job_description). The
+pasted case is parsed on the fly and never written to the jobs table —
+mailing one job description about a role you are not tracking should not
+force it into your saved job list.
 """
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,10 +37,17 @@ router = APIRouter(prefix="/email", tags=["email"])
 
 
 class EmailDraftIn(BaseModel):
-    job_id: str
     resume_id: str
     recipient_email: str
+    job_id: Optional[str] = None
+    job_description: Optional[str] = None
     extra_context: str = ""
+
+    @model_validator(mode="after")
+    def _one_job_source(self):
+        if not self.job_id and not (self.job_description or "").strip():
+            raise ValueError("Provide either job_id or job_description.")
+        return self
 
 
 class EmailEditIn(BaseModel):
@@ -61,9 +74,17 @@ async def create_draft(
     u: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    job = await db.get(Job, uuid.UUID(body.job_id))
-    if not job or job.user_id != u.id:
-        raise HTTPException(404, "Job not found")
+    saved_job_id = None
+    if body.job_id:
+        job = await db.get(Job, uuid.UUID(body.job_id))
+        if not job or job.user_id != u.id:
+            raise HTTPException(404, "Job not found")
+        job_parsed = job.parsed_data or {}
+        saved_job_id = job.id
+    else:
+        # pasted directly into this flow, parsed for this one email only,
+        # never written to the jobs table
+        job_parsed = await ai_service.parse_job(body.job_description or "")
 
     resume = await db.get(Resume, uuid.UUID(body.resume_id))
     if not resume or resume.user_id != u.id:
@@ -73,11 +94,11 @@ async def create_draft(
     profile = res.scalar_one_or_none()
     knowledge_graph = (profile.knowledge_graph if profile else None) or None
 
-    fit = await ai_service.analyze_fit(resume.parsed_data or {}, job.parsed_data or {})
+    fit = await ai_service.analyze_fit(resume.parsed_data or {}, job_parsed)
     name = (resume.parsed_data or {}).get("name") or u.full_name or ""
     drafted = await ai_service.generate_email(
         name=name,
-        job_parsed=job.parsed_data or {},
+        job_parsed=job_parsed,
         fit=fit,
         extra_context=body.extra_context,
         knowledge_graph=knowledge_graph,
@@ -85,7 +106,7 @@ async def create_draft(
 
     e = EmailSend(
         user_id=u.id,
-        job_id=job.id,
+        job_id=saved_job_id,
         resume_id=resume.id,
         recipient_email=body.recipient_email,
         subject=drafted.get("subject", ""),

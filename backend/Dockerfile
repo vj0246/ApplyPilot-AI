@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # This is the single biggest reason the image is heavier than before —
 # worth it, it's the only way to actually drive a real Chromium instance
 # to fill out a Google Form.
-RUN playwright install chromium
+RUN playwright install --with-deps chromium
 
 COPY . .
 

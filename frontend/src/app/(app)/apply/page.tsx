@@ -99,7 +99,11 @@ export default function ApplyPage() {
   const result = runData?.result;
 
   // ── Application email ─────────────────────────────────────────────
+  // A job description can be pasted straight into this flow, or an
+  // existing saved job can be picked instead — either way nothing is
+  // ever added to the Jobs page just because an email got sent about it.
   const [emailJobId, setEmailJobId] = useState("");
+  const [emailJobDescription, setEmailJobDescription] = useState("");
   const [emailResumeId, setEmailResumeId] = useState("");
   const [recipientEmail, setRecipientEmail] = useState("");
   const [emailContext, setEmailContext] = useState("");
@@ -107,7 +111,8 @@ export default function ApplyPage() {
 
   const draftEmailMut = useMutation({
     mutationFn: () => emailApi.draft({
-      job_id: emailJobId,
+      job_id: emailJobId || undefined,
+      job_description: emailJobId ? undefined : emailJobDescription.trim(),
       resume_id: emailResumeId || resumeId,
       recipient_email: recipientEmail.trim(),
       extra_context: emailContext,
@@ -495,18 +500,30 @@ export default function ApplyPage() {
 
           <Card className="space-y-5">
             <div>
-              <label className="label flex items-center gap-1.5"><Briefcase className="w-3.5 h-3.5" /> Job posting</label>
-              {readyJobs.length === 0 ? (
-                <p className="text-sm text-gray-400">No processed jobs available</p>
-              ) : (
-                <select value={emailJobId} onChange={(e) => setEmailJobId(e.target.value)} className="input">
-                  <option value="">Select a job</option>
+              <label className="label flex items-center gap-1.5"><Briefcase className="w-3.5 h-3.5" /> Job description</label>
+              <Textarea
+                value={emailJobDescription}
+                onChange={(e) => { setEmailJobDescription(e.target.value); if (e.target.value.trim()) setEmailJobId(""); }}
+                rows={5}
+                placeholder="Paste the job description here. No need to add it on the Jobs page first."
+              />
+            </div>
+
+            {readyJobs.length > 0 && (
+              <div>
+                <label className="label">Or use a saved job <span className="text-gray-400 font-normal">(optional, instead of pasting above)</span></label>
+                <select
+                  value={emailJobId}
+                  onChange={(e) => { setEmailJobId(e.target.value); if (e.target.value) setEmailJobDescription(""); }}
+                  className="input"
+                >
+                  <option value="">None, use the pasted description above</option>
                   {readyJobs.map((j: any) => (
                     <option key={j.id} value={j.id}>{j.title} — {j.company}</option>
                   ))}
                 </select>
-              )}
-            </div>
+              </div>
+            )}
 
             <div>
               <label className="label flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" /> Resume to use</label>
@@ -543,7 +560,7 @@ export default function ApplyPage() {
 
             <button
               onClick={() => draftEmailMut.mutate()}
-              disabled={!emailJobId || !recipientEmail.trim() || (!emailResumeId && !resumeId) || draftEmailMut.isPending}
+              disabled={(!emailJobId && !emailJobDescription.trim()) || !recipientEmail.trim() || (!emailResumeId && !resumeId) || draftEmailMut.isPending}
               className="btn-primary w-full justify-center py-2.5"
             >
               {draftEmailMut.isPending ? (

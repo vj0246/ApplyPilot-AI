@@ -107,8 +107,10 @@ export const autofillApi = {
 // Drafts the email from a job description, a person can edit it, and the
 // send call is separate and explicit — nothing goes out on its own.
 export const emailApi = {
-  draft: (d: { job_id: string; resume_id: string; recipient_email: string; extra_context?: string }) =>
-    api.post("/email/draft", d, { timeout: 60_000 }),
+  draft: (d: {
+    resume_id: string; recipient_email: string;
+    job_id?: string; job_description?: string; extra_context?: string;
+  }) => api.post("/email/draft", d, { timeout: 60_000 }),
   get: (id: string) => api.get(`/email/${id}`),
   update: (id: string, d: { subject?: string; body?: string }) => api.patch(`/email/${id}`, d),
   send: (id: string) => api.post(`/email/${id}/send`),
