@@ -4,7 +4,11 @@ sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
 python-jose[cryptography]==3.3.0
 cryptography==44.0.0
-passlib[bcrypt]==1.7.4
+# bcrypt must stay pinned below 4.1 — passlib 1.7.4 (unmaintained) probes
+# bcrypt internals that were removed in newer releases; with bcrypt 5.x
+# every hash() call raises and register/login 500s.
+passlib==1.7.4
+bcrypt==4.0.1
 python-multipart==0.0.20
 pydantic==2.10.4
 pydantic-settings==2.7.0
