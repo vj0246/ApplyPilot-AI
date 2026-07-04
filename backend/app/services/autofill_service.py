@@ -123,11 +123,24 @@ async def _read_single_question(item, idx: int) -> Optional[FormField]:
     radio_inputs = await item.query_selector_all("[role='radio']")
     if radio_inputs:
         options = [lbl.strip() for r in radio_inputs if (lbl := await r.get_attribute("aria-label"))]
+        if _looks_like_grid(options):
+            # A multiple choice grid (one row of radio buttons per skill,
+            # columns like Beginner/Intermediate/Expert) renders each cell
+            # as its own [role='radio'] with an aria-label like "Python,
+            # response for Beginner" — every cell across every row lands
+            # in this one query, so what looks like a normal single choice
+            # question is actually N unrelated questions tangled together,
+            # and the id captured above belongs to internal grid plumbing,
+            # not a single answerable entry. There's no correct single
+            # answer to give this, so it's left for the person to fill in.
+            return None
         return FormField(idx, question_text, "radio", options, required, entry_id)
 
     checkbox_inputs = await item.query_selector_all("[role='checkbox']")
     if checkbox_inputs:
         options = [lbl.strip() for c in checkbox_inputs if (lbl := await c.get_attribute("aria-label"))]
+        if _looks_like_grid(options):
+            return None
         return FormField(idx, question_text, "checkbox", options, required, entry_id)
 
     listbox = await item.query_selector("[role='listbox']")
@@ -147,6 +160,10 @@ async def _read_single_question(item, idx: int) -> Optional[FormField]:
     return None
 
 
+def _looks_like_grid(options: List[str]) -> bool:
+    return any(", response for " in o for o in options)
+
+
 async def _read_entry_id(item) -> Optional[str]:
     # Short answer and paragraph fields render a real <input>/<textarea>
     # whose name attribute is literally "entry.<id>" — the same identifier
@@ -157,11 +174,20 @@ async def _read_entry_id(item) -> Optional[str]:
     # read instead from the data-params attribute Google attaches to the
     # question container, which is a JSON-like array with the entry id as
     # its first long numeric token.
+    # A real Google entry id is always a plain number. Some named inputs
+    # carry a suffix used for internal plumbing (seen in the wild:
+    # "entry.1677974547_sentinel" on a grid question) — appending that
+    # suffix into a URL as entry.<id>_sentinel isn't a parameter Google's
+    # prefill mechanism recognizes, and one invalid entry name is enough
+    # to make it discard prefilling the entire page rather than just that
+    # one field. Anything that isn't clean digits is rejected outright.
     named = await item.query_selector("input[name^='entry.'], textarea[name^='entry.']")
     if named:
         name = await named.get_attribute("name")
         if name and "." in name:
-            return name.split(".", 1)[1]
+            candidate = name.split(".", 1)[1]
+            if candidate.isdigit():
+                return candidate
 
     # data-params can sit on the listitem itself or on a nested element
     # depending on which question type rendered it, so check both rather
@@ -226,11 +252,19 @@ async def get_answers_for_fields(
     for f, raw in zip(fields, raw_answers):
         answer_text = raw.get("answer", "").strip()
 
-        if f.field_type in ("radio", "dropdown") and f.options:
+        if f.field_type in ("radio", "dropdown", "checkbox") and not f.options:
+            # Scraping found the widget but couldn't read its option list —
+            # a free-text sentence has nowhere valid to go on a constrained
+            # field type, and typing one into a dropdown or radio group
+            # either fails outright or corrupts the pre-filled link with a
+            # value Google was never going to accept. Left for the person
+            # to pick by hand instead of guessing.
+            filled.append(FilledField(f.index, f.question, "", f.field_type, confidence="low"))
+        elif f.field_type in ("radio", "dropdown"):
             matched = _match_option(answer_text, f.options)
             filled.append(FilledField(f.index, f.question, matched or f.options[0],
                                        f.field_type, confidence="high" if matched else "low"))
-        elif f.field_type == "checkbox" and f.options:
+        elif f.field_type == "checkbox":
             matched_list = _match_multiple_options(answer_text, f.options)
             filled.append(FilledField(f.index, f.question, ", ".join(matched_list),
                                        f.field_type, confidence="high" if matched_list else "low"))

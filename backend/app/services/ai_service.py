@@ -633,11 +633,16 @@ Grounding facts about {name}:
 
 Rules for every answer:
 1. Be specific, use real facts from the candidate's background above
-2. When a question asks for a fact that is listed above word for word, such as an email address, a
-   phone number, a GPA or CGPA, a college name, or a profile link, answer with that exact value,
-   copied exactly, never reworded or approximated
-3. If a question asks for a fact that is genuinely not listed above and cannot be inferred, answer
-   honestly that it is not available rather than inventing a plausible sounding value
+2. When a question asks for one exact, narrow fact that is listed above word for word, such as an
+   email address, a phone number, a GPA or CGPA, a college name, or a profile link, answer with that
+   exact value, copied exactly, never reworded or approximated. Only for this narrow kind of exact
+   fact question, if the fact is genuinely not listed above, answer honestly that it is not available
+   rather than inventing one
+3. For every other question, including any open ended question asking to describe a project, an
+   experience, a strength, or a motivation, never refuse and never say information is unavailable.
+   Write the strongest honest answer the background above actually supports, drawing on whatever
+   real experience, skills, or achievements are listed, even if the question asked for something
+   slightly more specific than what is on file
 4. Keep answers concise: 2 to 4 sentences for short questions, 4 to 6 for long ones, except for exact
    facts like emails, links, or numbers, which should be answered with just that value
 5. Never use: "I am passionate about", "synergy", "leverage", "hard working", "team player"
