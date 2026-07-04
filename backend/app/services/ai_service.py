@@ -19,10 +19,19 @@ import re
 import logging
 from typing import Any, Dict, List, Optional
 
+import groq
 from groq import AsyncGroq
 from app.core.config import settings
 
 log = logging.getLogger(__name__)
+
+# GROQ_API_KEY can hold several comma separated keys. This process
+# remembers which one last worked so it doesn't retry an exhausted key on
+# every single request — it only moves forward when the current one
+# actually fails, and never wraps back to an earlier key on its own,
+# since a key that hit its rate limit a moment ago is still the one most
+# likely to still be limited.
+_current_key_index = 0
 
 
 # Appended to every system prompt that produces text a real person will read
@@ -38,38 +47,53 @@ Writing standards, follow every one of these without exception:
 """
 
 
-def _client() -> AsyncGroq:
-    # not built at import time on purpose — if there's no key yet (normal
-    # right after cloning), we want the failure to happen when someone
-    # actually tries to generate something, with a message that says why
-    if not settings.GROQ_API_KEY or settings.GROQ_API_KEY == "gsk_your_key_here":
-        raise ValueError(
-            "GROQ_API_KEY is not set. Get a free key at https://console.groq.com "
-            "and add it to your .env file."
-        )
-    return AsyncGroq(api_key=settings.GROQ_API_KEY)
+def _client(key: str) -> AsyncGroq:
+    return AsyncGroq(api_key=key)
 
 
 async def _chat(prompt: str, system: str = "", temperature: float = 0.4, max_tokens: int = 2000) -> str:
+    global _current_key_index
+
+    keys = settings.GROQ_API_KEYS
+    if not keys or keys == ["gsk_your_key_here"]:
+        log.warning(
+            "GROQ_API_KEY is not set. Get a free key at https://console.groq.com "
+            "and add it to your .env file."
+        )
+        return ""
+
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
-    try:
-        resp = await _client().chat.completions.create(
-            model=settings.GROQ_MODEL,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        return resp.choices[0].message.content or ""
-    except ValueError as e:
-        log.warning(str(e))
-        return ""
-    except Exception as e:
-        log.warning(f"Groq API error: {e}")
-        return ""
+    # Start from whichever key last worked, and only move forward — never
+    # loop back to the start mid request, so a request never accidentally
+    # retries a key it already just proved is out of quota.
+    start = _current_key_index % len(keys)
+    for offset in range(len(keys)):
+        i = (start + offset) % len(keys)
+        try:
+            resp = await _client(keys[i]).chat.completions.create(
+                model=settings.GROQ_MODEL,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            _current_key_index = i
+            return resp.choices[0].message.content or ""
+        except (groq.RateLimitError, groq.AuthenticationError, groq.PermissionDeniedError) as e:
+            # rate limited, or this particular key is invalid/revoked —
+            # either way it's this key's problem, not the request's, so
+            # the next key gets a fair try before giving up entirely
+            log.warning(f"Groq key #{i + 1} of {len(keys)} unavailable ({type(e).__name__}), trying next key")
+            continue
+        except Exception as e:
+            log.warning(f"Groq API error: {e}")
+            return ""
+
+    log.warning(f"All {len(keys)} Groq keys are rate limited or invalid — falling back to the regex parser")
+    return ""
 
 
 async def _json_chat(prompt: str, system: str = "") -> Dict[str, Any]:
