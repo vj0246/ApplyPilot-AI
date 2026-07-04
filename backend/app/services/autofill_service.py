@@ -26,6 +26,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 from playwright.async_api import async_playwright, Page, TimeoutError as PlaywrightTimeout
 
@@ -41,6 +42,7 @@ class FormField:
     field_type: str   # text | paragraph | radio | checkbox | dropdown
     options: List[str] = field(default_factory=list)
     required: bool = False
+    entry_id: Optional[str] = None
 
 
 @dataclass
@@ -116,31 +118,64 @@ async def _read_single_question(item, idx: int) -> Optional[FormField]:
 
     required = question_text.rstrip().endswith("*")
     question_text = question_text.rstrip("*").strip()
+    entry_id = await _read_entry_id(item)
 
     radio_inputs = await item.query_selector_all("[role='radio']")
     if radio_inputs:
         options = [lbl.strip() for r in radio_inputs if (lbl := await r.get_attribute("aria-label"))]
-        return FormField(idx, question_text, "radio", options, required)
+        return FormField(idx, question_text, "radio", options, required, entry_id)
 
     checkbox_inputs = await item.query_selector_all("[role='checkbox']")
     if checkbox_inputs:
         options = [lbl.strip() for c in checkbox_inputs if (lbl := await c.get_attribute("aria-label"))]
-        return FormField(idx, question_text, "checkbox", options, required)
+        return FormField(idx, question_text, "checkbox", options, required, entry_id)
 
     listbox = await item.query_selector("[role='listbox']")
     if listbox:
         options = await _read_dropdown_options(listbox)
-        return FormField(idx, question_text, "dropdown", options, required)
+        return FormField(idx, question_text, "dropdown", options, required, entry_id)
 
     textarea = await item.query_selector("textarea")
     if textarea:
-        return FormField(idx, question_text, "paragraph", [], required)
+        return FormField(idx, question_text, "paragraph", [], required, entry_id)
 
     text_input = await item.query_selector("input[type='text']")
     if text_input:
-        return FormField(idx, question_text, "text", [], required)
+        return FormField(idx, question_text, "text", [], required, entry_id)
 
     # file upload, date picker, linear scale etc — skip rather than guess
+    return None
+
+
+async def _read_entry_id(item) -> Optional[str]:
+    # Short answer and paragraph fields render a real <input>/<textarea>
+    # whose name attribute is literally "entry.<id>" — the same identifier
+    # Google's own formResponse endpoint reads on submit, and the same one
+    # the "Get pre-filled link" feature encodes into a shareable URL. Choice
+    # type fields (radio, checkbox, dropdown) don't have a native named
+    # input since Google renders custom widgets for those, so the id is
+    # read instead from the data-params attribute Google attaches to the
+    # question container, which is a JSON-like array with the entry id as
+    # its first long numeric token.
+    named = await item.query_selector("input[name^='entry.'], textarea[name^='entry.']")
+    if named:
+        name = await named.get_attribute("name")
+        if name and "." in name:
+            return name.split(".", 1)[1]
+
+    # data-params can sit on the listitem itself or on a nested element
+    # depending on which question type rendered it, so check both rather
+    # than assuming one exact spot in the tree.
+    params = await item.get_attribute("data-params")
+    if not params:
+        holder = await item.query_selector("[data-params]")
+        if holder:
+            params = await holder.get_attribute("data-params")
+    if params:
+        m = re.search(r"\[(\d{5,})", params)
+        if m:
+            return m.group(1)
+
     return None
 
 
@@ -434,6 +469,40 @@ async def fill_microsoft_form(page: Page, filled_fields: List[FilledField]) -> N
             continue
 
 
+# ── Pre-filled link ───────────────────────────────────────────────────────
+# The same mechanism behind Google Forms' own "Get pre-filled link" feature:
+# encode each answer as an entry.<id>=value query parameter on the viewform
+# URL. Opening that URL shows the form with those answers already typed in,
+# still fully editable, so the person reviews and clicks submit inside the
+# real Google Forms page instead of a link that reloads it blank. A field
+# with no captured entry id (extraction failed, or it's a type this tool
+# doesn't map, such as file upload) is simply left out — nothing to prefill
+# there, the person fills that one in by hand same as always.
+
+def build_prefilled_url(form_url: str, form_fields: List[FormField], filled: List[FilledField]) -> Optional[str]:
+    entry_by_index = {f.index: f.entry_id for f in form_fields}
+    params: List[tuple] = []
+
+    for ff in filled:
+        entry_id = entry_by_index.get(ff.index)
+        if not entry_id or not ff.answer:
+            continue
+        if ff.field_type == "checkbox":
+            for value in [v.strip() for v in ff.answer.split(",") if v.strip()]:
+                params.append((f"entry.{entry_id}", value))
+        else:
+            params.append((f"entry.{entry_id}", ff.answer))
+
+    if not params:
+        return None
+
+    split = urlsplit(form_url)
+    existing = parse_qsl(split.query, keep_blank_values=True)
+    combined = existing + params
+    new_query = urlencode(combined, doseq=False)
+    return urlunsplit((split.scheme, split.netloc, split.path, new_query, split.fragment))
+
+
 # ── Orchestration ─────────────────────────────────────────────────────────
 
 async def run_autofill(
@@ -512,9 +581,15 @@ async def run_autofill(
 
             unfilled = sum(1 for f in filled if not f.answer)
 
+            # Google Forms only — Microsoft Forms has no equivalent
+            # pre-filled link mechanism, so that flow keeps pointing at
+            # the plain form_url as it always has.
+            prefilled_url = build_prefilled_url(form_url, fields, filled) if is_google else None
+
             return {
                 "title": scraped["title"],
                 "form_url": form_url,
+                "prefilled_url": prefilled_url,
                 "fields": [
                     {"question": f.question, "field_type": f.field_type,
                      "answer": f.answer, "confidence": f.confidence}

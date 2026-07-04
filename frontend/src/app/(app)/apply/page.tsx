@@ -450,10 +450,27 @@ export default function ApplyPage() {
                     )}
                   </p>
                 </div>
-                <a href={result.form_url} target="_blank" rel="noopener noreferrer" className="btn-primary text-sm">
-                  Open form to review & submit <ExternalLink className="w-3.5 h-3.5" />
+                <a
+                  href={result.prefilled_url || result.form_url}
+                  target="_blank" rel="noopener noreferrer"
+                  className="btn-primary text-sm"
+                >
+                  Open pre-filled form <ExternalLink className="w-3.5 h-3.5" />
                 </a>
               </div>
+
+              {result.prefilled_url ? (
+                <p className="text-xs text-emerald-700 bg-emerald-50 p-2 rounded-lg">
+                  The link above opens the real form with these answers already typed in and still
+                  editable. Review it, sign in yourself if the form asks for that, upload your resume
+                  if it wants a file, then submit.
+                </p>
+              ) : (
+                <p className="text-xs text-yellow-700 bg-yellow-50 p-2 rounded-lg">
+                  Couldn't build a link with the answers already in place for this form, so the button
+                  above opens it blank. Use the preview below to copy the answers over by hand.
+                </p>
+              )}
 
               {result.screenshot_base64 && (
                 <img
