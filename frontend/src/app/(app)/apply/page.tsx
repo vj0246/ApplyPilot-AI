@@ -455,7 +455,7 @@ export default function ApplyPage() {
                   target="_blank" rel="noopener noreferrer"
                   className="btn-primary text-sm"
                 >
-                  Open pre-filled form <ExternalLink className="w-3.5 h-3.5" />
+                  {result.prefilled_url ? "Open pre-filled form" : "Open blank form"} <ExternalLink className="w-3.5 h-3.5" />
                 </a>
               </div>
 
