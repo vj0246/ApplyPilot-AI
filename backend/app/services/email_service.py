@@ -15,11 +15,32 @@ decides when it actually goes out.
 """
 import asyncio
 import logging
+import socket
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 log = logging.getLogger(__name__)
+
+
+class _IPv4SMTP(smtplib.SMTP):
+    """Plain smtplib.SMTP resolves the mail server's hostname with no
+    address family preference, and on Render (and several other cloud
+    hosts) the container only has an outbound route for IPv4. If Gmail's
+    AAAA record comes back first, the connection attempt fails with
+    "Network is unreachable" before IPv4 is ever tried. Forcing AF_INET at
+    the socket level sidesteps that entirely; the hostname stored on the
+    instance for the STARTTLS certificate check is untouched, so
+    certificate validation still checks against the real mail server name,
+    not the raw IP."""
+    def _get_socket(self, host, port, timeout):
+        addr_info = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+        family, socktype, proto, _canonname, sockaddr = addr_info[0]
+        sock = socket.socket(family, socktype, proto)
+        if timeout is not None:
+            sock.settimeout(timeout)
+        sock.connect(sockaddr)
+        return sock
 
 
 def _send_sync(
@@ -38,7 +59,7 @@ def _send_sync(
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain"))
 
-    with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as server:
+    with _IPv4SMTP(smtp_host, smtp_port, timeout=20) as server:
         server.starttls()
         server.login(smtp_username, smtp_password)
         server.sendmail(sender_email, [recipient_email], msg.as_string())
