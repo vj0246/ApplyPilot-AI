@@ -578,12 +578,53 @@ async def answer_form_questions(
     culture  = ", ".join(((job_parsed or {}).get("culture") or [])[:3])
     graph_context = _knowledge_graph_context(knowledge_graph)
 
+    # Forms routinely ask for exactly these facts by name — email, phone,
+    # location, profile links, and education details. All of it already
+    # sits on resume_parsed from parse_resume(), but nothing below this
+    # point used to read past skills and the most recent job, so a
+    # question like "What is your CGPA" or "Share your GitHub" had no
+    # answer to draw from no matter how good the resume was.
+    contact_lines = []
+    if resume_parsed.get("email"):
+        contact_lines.append(f"Email: {resume_parsed['email']}")
+    if resume_parsed.get("phone"):
+        contact_lines.append(f"Phone: {resume_parsed['phone']}")
+    if resume_parsed.get("location"):
+        contact_lines.append(f"Location: {resume_parsed['location']}")
+    if resume_parsed.get("linkedin"):
+        contact_lines.append(f"LinkedIn: {resume_parsed['linkedin']}")
+    if resume_parsed.get("github"):
+        contact_lines.append(f"GitHub: {resume_parsed['github']}")
+    if resume_parsed.get("portfolio"):
+        contact_lines.append(f"Portfolio: {resume_parsed['portfolio']}")
+    contact_block = "\n".join(contact_lines)
+
+    education_lines = []
+    for ed in (resume_parsed.get("education") or [])[:3]:
+        parts = [p for p in [ed.get("degree"), ed.get("field")] if p]
+        line = " in ".join(parts) if parts else "Degree"
+        if ed.get("school"):
+            line += f" from {ed['school']}"
+        if ed.get("year"):
+            line += f", {ed['year']}"
+        if ed.get("gpa"):
+            line += f", GPA or CGPA: {ed['gpa']}"
+        education_lines.append(line)
+    education_block = "\n".join(education_lines)
+
+    certifications = ", ".join((resume_parsed.get("certifications") or [])[:5])
+
     system = f"""You are helping {name} fill in a job application for {jt} at {company}, section by
 section, question by question. You are reading the whole form the way a thoughtful human
 assistant would, not answering each question in isolation.
 Write answers that sound like a real, thoughtful human wrote them, not AI generated.
 
 Grounding facts about {name}:
+- Contact and profile links:
+{contact_block or "  (none on file)"}
+- Education:
+{education_block or "  (none on file)"}
+- Certifications: {certifications or "none on file"}
 - Recent role: {recent}
 - Key achievements: {bullets}
 - Technical skills: {skills}
@@ -592,11 +633,17 @@ Grounding facts about {name}:
 
 Rules for every answer:
 1. Be specific, use real facts from the candidate's background above
-2. Keep answers concise: 2 to 4 sentences for short questions, 4 to 6 for long ones
-3. Never use: "I am passionate about", "synergy", "leverage", "hard working", "team player"
-4. Sound genuine, confident, and direct
-5. If a question asks about salary, give a reasonable range based on industry norms
-6. For "Why this company?", reference something specific about {company} (culture: {culture})
+2. When a question asks for a fact that is listed above word for word, such as an email address, a
+   phone number, a GPA or CGPA, a college name, or a profile link, answer with that exact value,
+   copied exactly, never reworded or approximated
+3. If a question asks for a fact that is genuinely not listed above and cannot be inferred, answer
+   honestly that it is not available rather than inventing a plausible sounding value
+4. Keep answers concise: 2 to 4 sentences for short questions, 4 to 6 for long ones, except for exact
+   facts like emails, links, or numbers, which should be answered with just that value
+5. Never use: "I am passionate about", "synergy", "leverage", "hard working", "team player"
+6. Sound genuine, confident, and direct
+7. If a question asks about salary, give a reasonable range based on industry norms
+8. For "Why this company?", reference something specific about {company} (culture: {culture})
 {WRITING_STANDARDS}
 Return a JSON array, one object per question:
 [{{"question": "...", "answer": "..."}}]"""
