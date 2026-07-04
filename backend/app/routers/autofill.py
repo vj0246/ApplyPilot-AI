@@ -122,6 +122,15 @@ async def _run(run_id: str, form_url: str, extra_context: str):
             run.result = result
             await db.commit()
             log.info(f"Autofill {run_id} done — {len(result['fields'])} fields, {result['unfilled_count']} unfilled")
+        except autofill_service.FormScrapeError as e:
+            # carries a screenshot of whatever page Playwright actually
+            # saw, so a bot check page and a genuinely unrecognized layout
+            # don't look identical from the error message alone
+            log.error(f"Autofill {run_id} found no fields: {e}")
+            run.status = "failed"
+            run.error_msg = str(e)[:400]
+            run.result = {"debug_screenshot_base64": e.screenshot_b64} if e.screenshot_b64 else None
+            await db.commit()
         except Exception as e:
             log.error(f"Autofill {run_id} failed: {e}")
             run.status = "failed"

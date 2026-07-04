@@ -420,11 +420,21 @@ export default function ApplyPage() {
           )}
 
           {isFailed && (
-            <Card className="bg-red-50 border-red-100">
+            <Card className="bg-red-50 border-red-100 space-y-3">
               <div className="flex gap-2">
                 <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                 <p className="text-sm text-red-700">{runData?.error || "Autofill failed. Check the link and try again."}</p>
               </div>
+              {result?.debug_screenshot_base64 && (
+                <div>
+                  <p className="text-xs text-red-600 mb-1.5">What was actually loaded when this ran:</p>
+                  <img
+                    src={`data:image/png;base64,${result.debug_screenshot_base64}`}
+                    alt="What the form filler actually saw"
+                    className="w-full rounded-lg border border-red-200"
+                  />
+                </div>
+              )}
             </Card>
           )}
 

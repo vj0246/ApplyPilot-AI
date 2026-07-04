@@ -52,6 +52,19 @@ class FilledField:
     confidence: str = "medium"   # high | medium | low
 
 
+class FormScrapeError(ValueError):
+    """Raised when the page loaded but no fillable questions were found on
+    it. Carries a screenshot of whatever Playwright actually saw, because
+    the two real causes look identical from the error message alone: an
+    unrecognized form layout, or Google/Microsoft showing a bot check
+    instead of the real form to a cloud server's IP address. Without the
+    screenshot there is no way to tell which one happened from server
+    logs alone."""
+    def __init__(self, message: str, screenshot_b64: Optional[str] = None):
+        super().__init__(message)
+        self.screenshot_b64 = screenshot_b64
+
+
 def is_google_form_url(url: str) -> bool:
     return "docs.google.com/forms" in url
 
@@ -456,9 +469,14 @@ async def run_autofill(
             fields: List[FormField] = scraped["fields"]
 
             if not fields:
-                raise ValueError(
-                    "Couldn't find any fillable questions on this form. "
-                    "It might be using a layout this tool doesn't recognize yet."
+                debug_bytes = await page.screenshot(full_page=True)
+                debug_b64 = base64.b64encode(debug_bytes).decode()
+                raise FormScrapeError(
+                    "Couldn't find any fillable questions on this form. This usually means either "
+                    "the form uses a layout this tool doesn't recognize yet, or the form provider "
+                    "showed a bot check instead of the real form because the request came from a "
+                    "cloud server. Check the screenshot below to see what was actually loaded.",
+                    screenshot_b64=debug_b64,
                 )
 
             filled = await get_answers_for_fields(
