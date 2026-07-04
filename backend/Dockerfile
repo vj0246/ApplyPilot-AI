@@ -1,4 +1,8 @@
-FROM python:3.11-slim
+# Pinned to bookworm on purpose — the unqualified python:3.11-slim tag has
+# rolled forward to trixie, and playwright's --with-deps package list does
+# not know trixie's renamed font packages yet (ttf-unifont became
+# fonts-unifont), which makes apt-get fail mid-build.
+FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
