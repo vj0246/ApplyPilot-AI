@@ -17,6 +17,7 @@ import asyncio
 import logging
 import socket
 import smtplib
+import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -43,6 +44,29 @@ class _IPv4SMTP(smtplib.SMTP):
         return sock
 
 
+def _build_message(sender_email: str, recipient_email: str, subject: str, body: str) -> MIMEMultipart:
+    msg = MIMEMultipart()
+    msg["From"] = sender_email
+    msg["To"] = recipient_email
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain"))
+    return msg
+
+
+def _send_starttls(smtp_host, port, smtp_username, smtp_password, sender_email, recipient_email, msg, timeout):
+    with _IPv4SMTP(smtp_host, port, timeout=timeout) as server:
+        server.starttls()
+        server.login(smtp_username, smtp_password)
+        server.sendmail(sender_email, [recipient_email], msg.as_string())
+
+
+def _send_ssl(smtp_host, port, smtp_username, smtp_password, sender_email, recipient_email, msg, timeout):
+    context = ssl.create_default_context()
+    with smtplib.SMTP_SSL(smtp_host, port, timeout=timeout, context=context) as server:
+        server.login(smtp_username, smtp_password)
+        server.sendmail(sender_email, [recipient_email], msg.as_string())
+
+
 def _send_sync(
     smtp_host: str,
     smtp_port: int,
@@ -53,16 +77,44 @@ def _send_sync(
     subject: str,
     body: str,
 ) -> None:
-    msg = MIMEMultipart()
-    msg["From"] = sender_email
-    msg["To"] = recipient_email
-    msg["Subject"] = subject
-    msg.attach(MIMEText(body, "plain"))
+    msg = _build_message(sender_email, recipient_email, subject, body)
 
-    with _IPv4SMTP(smtp_host, smtp_port, timeout=20) as server:
-        server.starttls()
-        server.login(smtp_username, smtp_password)
-        server.sendmail(sender_email, [recipient_email], msg.as_string())
+    # The port the user configured is tried first. If it hangs rather than
+    # cleanly refusing, that is the signature of a network in between
+    # silently dropping the connection rather than a real login problem,
+    # so falling back to the other common submission port on a fresh
+    # connection is worth one extra attempt before giving up. Some cloud
+    # hosts' outbound networks (and some receiving mail providers'
+    # datacenter IP filtering) allow one of 587 or 465 and not the other.
+    attempts = [smtp_port] + [p for p in (587, 465) if p != smtp_port]
+    last_error: Exception | None = None
+
+    for port in attempts:
+        try:
+            if port == 465:
+                _send_ssl(smtp_host, port, smtp_username, smtp_password, sender_email, recipient_email, msg, timeout=15)
+            else:
+                _send_starttls(smtp_host, port, smtp_username, smtp_password, sender_email, recipient_email, msg, timeout=15)
+            return
+        except smtplib.SMTPAuthenticationError:
+            # credentials are wrong, a different port will not fix that,
+            # fail immediately with a message that says so plainly
+            raise RuntimeError(
+                "The mail server rejected the email address or app password. Double check both in "
+                "settings, and confirm the app password was generated after two factor authentication "
+                "was turned on."
+            )
+        except (socket.timeout, TimeoutError, OSError) as e:
+            last_error = e
+            log.warning(f"SMTP send via port {port} failed ({e}), trying next option if any remain")
+            continue
+
+    raise RuntimeError(
+        f"Could not reach the mail server on any port ({', '.join(str(p) for p in attempts)}). "
+        f"The connection attempt itself timed out rather than being refused, which usually means a "
+        f"network in between is silently blocking outbound mail traffic rather than the address or "
+        f"password being wrong. Last error: {last_error}"
+    )
 
 
 async def send_email(
