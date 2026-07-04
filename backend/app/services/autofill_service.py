@@ -465,6 +465,25 @@ async def run_autofill(
             if no_responses:
                 raise ValueError("This form is no longer accepting responses.")
 
+            # Some forms are set to "restrict to users in an organization" or
+            # otherwise require a signed-in Google account before showing any
+            # question at all — Google serves its own accounts.google.com
+            # sign-in page instead of the form. That is enforced by Google on
+            # its own servers, tied to whether the request carries a session
+            # for an authorized account; no amount of DOM scraping gets past
+            # it, and this tool will never store or replay someone's real
+            # Google login to try. Detecting it up front gives a clear
+            # answer instead of the generic "no fields found" message.
+            if is_google and "accounts.google.com" in page.url:
+                raise ValueError(
+                    "This form requires the person filling it out to be signed in to an authorized "
+                    "Google account before it will even show its questions. That is a restriction "
+                    "Google enforces on its own servers, and no automated tool can fill a form it is "
+                    "never shown. If this is your own form, turn off \"Restrict to users in your "
+                    "organization\" or the sign in requirement under Settings, then Responses. "
+                    "Otherwise, ask whoever owns the form for a link that does not require signing in."
+                )
+
             scraped = await scrape_google_form(page) if is_google else await scrape_microsoft_form(page)
             fields: List[FormField] = scraped["fields"]
 
