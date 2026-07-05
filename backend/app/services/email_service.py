@@ -14,7 +14,9 @@ human in the loop rule as the form autofill: the AI drafts, a person
 decides when it actually goes out.
 """
 import asyncio
+import html
 import logging
+import re
 import socket
 import smtplib
 import ssl
@@ -46,6 +48,35 @@ class _IPv4SMTP(smtplib.SMTP):
         return sock
 
 
+_URL_RE = re.compile(r"https?://[^\s<>\"]+")
+
+
+def _body_to_html(body: str) -> str:
+    """The user drafts and edits plain text; the HTML version is derived
+    from it at send time so what they approved and what goes out never
+    drift apart. Paragraphs come from blank lines, single newlines become
+    line breaks (that's what keeps the signature block stacked), and bare
+    URLs become clickable links — which is the whole point of sending an
+    HTML part at all: a signature reading github.com/... that the
+    recipient can't click is a worse first impression than plain text."""
+    paragraphs = []
+    for para in re.split(r"\n\s*\n", body.strip()):
+        escaped = html.escape(para)
+        linked = _URL_RE.sub(
+            lambda m: f'<a href="{m.group(0)}" style="color:#3730a3;">{m.group(0)}</a>',
+            escaped,
+        )
+        paragraphs.append(
+            f'<p style="margin:0 0 14px 0;">{linked.replace(chr(10), "<br>")}</p>'
+        )
+    return (
+        '<div style="font-family:Georgia,serif;font-size:15px;line-height:1.6;'
+        'color:#1f2937;max-width:640px;">'
+        + "".join(paragraphs)
+        + "</div>"
+    )
+
+
 def _build_message(
     sender_email: str,
     recipient_email: str,
@@ -54,11 +85,21 @@ def _build_message(
     attachment_bytes: Optional[bytes] = None,
     attachment_filename: Optional[str] = None,
 ) -> MIMEMultipart:
-    msg = MIMEMultipart()
+    # multipart/mixed wrapping multipart/alternative is the standard shape
+    # for "formatted email with an attachment": clients that render HTML
+    # show the formatted version, everything else falls back to the exact
+    # plain text the user approved, and the resume rides alongside either
+    # way.
+    msg = MIMEMultipart("mixed")
     msg["From"] = sender_email
     msg["To"] = recipient_email
     msg["Subject"] = subject
-    msg.attach(MIMEText(body, "plain"))
+
+    alternative = MIMEMultipart("alternative")
+    alternative.attach(MIMEText(body, "plain"))
+    alternative.attach(MIMEText(_body_to_html(body), "html"))
+    msg.attach(alternative)
+
     if attachment_bytes and attachment_filename:
         part = MIMEApplication(attachment_bytes, Name=attachment_filename)
         part["Content-Disposition"] = f'attachment; filename="{attachment_filename}"'

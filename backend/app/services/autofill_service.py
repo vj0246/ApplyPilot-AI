@@ -212,16 +212,23 @@ async def _read_entry_id(item) -> Optional[str]:
 
 
 async def _read_dropdown_options(listbox) -> List[str]:
-    try:
-        await listbox.click()
-        await asyncio.sleep(0.3)
-        opts = await listbox.query_selector_all("[role='option']")
-        labels = [t.strip() for o in opts if (t := await o.inner_text()) and t.strip().lower() != "choose"]
-        await listbox.page.keyboard.press("Escape")
-        await asyncio.sleep(0.2)
-        return labels
-    except Exception:
-        return []
+    # One retry on an empty read: the option list renders in an animated
+    # popup, and one click plus a fixed sleep sometimes samples it before
+    # the options exist. An empty list here means the whole field gets
+    # skipped as unanswerable, so a second attempt is cheap insurance.
+    for attempt in range(2):
+        try:
+            await listbox.click()
+            await asyncio.sleep(0.3 + attempt * 0.5)
+            opts = await listbox.query_selector_all("[role='option']")
+            labels = [t.strip() for o in opts if (t := await o.inner_text()) and t.strip().lower() != "choose"]
+            await listbox.page.keyboard.press("Escape")
+            await asyncio.sleep(0.2)
+            if labels:
+                return labels
+        except Exception:
+            continue
+    return []
 
 
 # ── Step 2: get answers from the same AI function the manual form ───────
@@ -236,6 +243,11 @@ async def get_answers_for_fields(
     knowledge_graph: Optional[Dict] = None,
     custom_instructions: str = "",
 ) -> List[FilledField]:
+    # Each question carries a hint about the widget it goes into, because
+    # the model can't see the page: a one line text box answered with a
+    # paragraph gets visually truncated in the real form, and a paragraph
+    # box answered with four words reads as low effort to whoever reviews
+    # the submission.
     questions_for_ai = []
     for f in fields:
         if f.options:
@@ -244,8 +256,10 @@ async def get_answers_for_fields(
                 questions_for_ai.append(f"{f.question} (choose one or more of: {opts})")
             else:
                 questions_for_ai.append(f"{f.question} (choose exactly one of: {opts})")
+        elif f.field_type == "paragraph":
+            questions_for_ai.append(f"{f.question} (long answer box: write 3 to 5 full sentences)")
         else:
-            questions_for_ai.append(f.question)
+            questions_for_ai.append(f"{f.question} (single line box: answer in one short line, never more)")
 
     raw_answers = await ai_service.answer_form_questions(
         questions=questions_for_ai,

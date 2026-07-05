@@ -775,8 +775,10 @@ Rules for every answer:
    Write the strongest honest answer the background above actually supports, drawing on whatever
    real experience, skills, or achievements are listed, even if the question asked for something
    slightly more specific than what is on file
-4. Keep answers concise: 2 to 4 sentences for short questions, 4 to 6 for long ones, except for exact
-   facts like emails, links, or numbers, which should be answered with just that value
+4. Match the answer length to the box it goes into. A question marked "single line box" gets one
+   short line, never a paragraph. A question marked "long answer box" gets 3 to 5 full, specific
+   sentences. Exact facts like emails, links, or numbers are always answered with just that value
+   regardless of the box
 5. Never use: "I am passionate about", "synergy", "leverage", "hard working", "team player"
 6. Sound genuine, confident, and direct
 7. If a question asks about salary, give a reasonable range in Indian Rupees based on industry
