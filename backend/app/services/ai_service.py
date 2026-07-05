@@ -3,7 +3,7 @@ ai_service.py
 --------------
 Every "AI" thing in this app goes through here — parsing resumes, parsing
 job posts, scoring fit, writing the cover letter/email/form answers. Runs
-on Groq (llama-3.3-70b-versatile by default). If the key's missing or Groq
+on Groq (openai/gpt-oss-120b by default). If the key's missing or Groq
 rate-limits us, every function falls back to plain regex so the app
 doesn't just 500 on someone.
 

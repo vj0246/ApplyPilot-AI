@@ -18,7 +18,12 @@ class Settings(BaseSettings):
     # next one the moment one hits its rate limit, instead of every
     # request failing over to the dumb regex fallback until it resets.
     GROQ_API_KEY: str = ""
-    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    # Must be a model the Groq account actually lists. llama-3.3-70b was
+    # retired from the lineup and every request against a missing model
+    # fails outright, which silently degrades all writing to the regex
+    # fallback — if answers ever go generic across the board, check this
+    # name against the models page first.
+    GROQ_MODEL: str = "openai/gpt-oss-120b"
 
     @property
     def GROQ_API_KEYS(self) -> list[str]:

@@ -88,7 +88,7 @@ Everything's editable. The AI gets you 90% there; you still own the last
                               │
                    ┌──────────▼──────────┐         ┌──────────────┐
                    │   Groq API (free)   │         │  PostgreSQL  │
-                   │  llama-3.3-70b      │         │  5 tables    │
+                   │  openai/gpt-oss-120b│         │  5 tables    │
                    └─────────────────────┘         └──────────────┘
 ```
 
@@ -214,7 +214,7 @@ Open `http://localhost:3000` and create an account.
 | State | React Query + Zustand | Server cache vs. client auth state, kept separate on purpose |
 | Backend | FastAPI, async SQLAlchemy 2 | Async all the way down, matches the polling-heavy workload |
 | Database | PostgreSQL 16 | 5 tables, nothing exotic — see `db/init.sql` |
-| AI | Groq, `llama-3.3-70b-versatile` | Free, fast, no local GPU needed |
+| AI | Groq, `openai/gpt-oss-120b` | Free, fast, no local GPU needed |
 | Auth | Plain JWT | No OAuth provider to configure for a side project |
 | Infra | Docker Compose | One command, three containers |
 
