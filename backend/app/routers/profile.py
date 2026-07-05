@@ -43,10 +43,18 @@ class ProfileIn(BaseModel):
     tone_preference: Optional[str] = None
     skills: Optional[List[str]] = None
     onboarding_done: Optional[bool] = None
+    custom_instructions: Optional[str] = None
 
 
 class KnowledgeGraphIn(BaseModel):
     answers: List[Dict[str, str]]  # [{"question": "...", "answer": "..."}]
+
+
+class KnowledgeGraphEditIn(BaseModel):
+    # The whole graph, exactly as the user wants it stored. This is the
+    # "edit my memory directly" path, distinct from the interview path
+    # below which merges AI extracted facts into what is already there.
+    knowledge_graph: Dict
 
 
 class EmailCredentialsIn(BaseModel):
@@ -74,6 +82,7 @@ def _out(p: Profile) -> dict:
         "tone_preference": p.tone_preference or "professional",
         "skills": p.skills or [],
         "onboarding_done": p.onboarding_done,
+        "custom_instructions": p.custom_instructions or "",
         "knowledge_graph": p.knowledge_graph or {},
         "email_account_configured": bool(p.smtp_password_encrypted),
         "sender_email": p.sender_email,
@@ -131,6 +140,22 @@ async def build_knowledge_graph(
     p = await _get_profile(u, db)
     new_fragment = await ai_service.build_knowledge_graph(body.answers)
     p.knowledge_graph = ai_service.merge_knowledge_graph(p.knowledge_graph, new_fragment)
+    await db.commit()
+    await db.refresh(p)
+    return {"knowledge_graph": p.knowledge_graph}
+
+
+@router.put("/knowledge-graph")
+async def edit_knowledge_graph(
+    body: KnowledgeGraphEditIn,
+    u: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    # Direct replacement, no merge: this endpoint exists precisely so a
+    # person can correct or remove something the interview path got wrong,
+    # and a merge would resurrect the very fact they deleted.
+    p = await _get_profile(u, db)
+    p.knowledge_graph = body.knowledge_graph
     await db.commit()
     await db.refresh(p)
     return {"knowledge_graph": p.knowledge_graph}

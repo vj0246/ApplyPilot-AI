@@ -44,7 +44,22 @@ Writing standards, follow every one of these without exception:
 2. Never use an abbreviation or an acronym. Spell every word and phrase out in full. Write "for example" instead of "e.g.", "and so on" instead of "etc.", "artificial intelligence" instead of "AI", "United States" instead of "US", "application" instead of "app".
 3. Never use a hyphen or a dash of any kind, anywhere, including inside compound words. If a word would normally be hyphenated, either join it into one word or rewrite the phrase with "to" or a comma instead.
 4. Be concrete and specific. Every sentence should earn its place and say something a generic answer could not say.
+5. Every amount of money, salary, stipend, or compensation is always expressed in Indian Rupees, written as "Indian Rupees" or with the rupee symbol. Never quote dollars, euros, pounds, or any other currency, even if the job posting used one; state the figure in Indian Rupees instead.
 """
+
+
+def _custom_instructions_block(custom_instructions: str) -> str:
+    # A user typed instruction about their own tone or format outranks the
+    # generic style of this app but never the honesty rules, so it is
+    # framed as the candidate's own standing request and appended after
+    # the base prompt rather than replacing any of it.
+    ci = (custom_instructions or "").strip()
+    if not ci:
+        return ""
+    return (
+        "\n\nStanding instructions from the candidate about their own tone and format. Follow these "
+        "as long as they do not ask you to invent facts or break the rules above:\n" + ci
+    )
 
 
 def _client(key: str) -> AsyncGroq:
@@ -125,6 +140,22 @@ async def _json_chat(prompt: str, system: str = "") -> Dict[str, Any]:
 async def parse_resume(raw_text: str) -> Dict[str, Any]:
     system = """You are an expert resume parser with 10 years of experience in HR and recruiting.
 Extract all information accurately from the resume text provided.
+
+Parsing rules, follow all of them:
+1. Read the ENTIRE text before extracting anything, resumes list the same fact in several places
+   and the most complete version wins
+2. Extract every project you can find, with its full description and every technology named for
+   it, including projects buried inside experience bullets
+3. Extract every education entry with its exact institution name as written, and capture GPA or
+   CGPA in any format it appears (for example "8.9/10", "3.7", "92%", "CGPA: 8.5") into the gpa
+   field exactly as written
+4. Capture every profile link, even without "https": text like "github.com/name" or
+   "linkedin.com/in/name" is a real link, normalize it to a full https URL
+5. Keep numbers and metrics inside bullets exactly as written, never round or reword them
+6. Do not drop skills because they look minor, list every tool, framework, library, and language
+   mentioned anywhere in the text
+7. Never invent anything that is not in the text, an empty string or null beats a guess
+
 Return ONLY a JSON object with this exact structure:
 {
   "name": "full name or empty string",
@@ -168,7 +199,7 @@ Return ONLY a JSON object with this exact structure:
   "awards": ["award or achievement"]
 }"""
 
-    result = await _json_chat(f"Parse this resume:\n\n{raw_text[:6000]}", system)
+    result = await _json_chat(f"Parse this resume:\n\n{raw_text[:12000]}", system)
     return result if result else _fallback_parse_resume(raw_text)
 
 
@@ -195,6 +226,22 @@ def _fallback_parse_resume(text: str) -> Dict[str, Any]:
     m = re.search(r"github\.com/([\w-]+)", text, re.I)
     if m:
         result["github"] = f"https://github.com/{m.group(1)}"
+
+    # GPA/CGPA and the school name matter to form autofill even when Groq
+    # is down — forms ask for exactly these two facts by name.
+    gpa = None
+    m = re.search(r"(?:CGPA|GPA)\s*[:\-]?\s*(\d{1,2}(?:\.\d{1,2})?(?:\s*/\s*\d{1,2})?)", text, re.I)
+    if m:
+        gpa = m.group(1).strip()
+    school = None
+    m = re.search(r"^.*\b(University|Institute|College|Academy|IIT|NIT|BITS|IIIT)\b.*$", text, re.I | re.M)
+    if m:
+        school = m.group(0).strip()[:120]
+    if gpa or school:
+        result["education"] = [{
+            "school": school or "", "degree": "", "field": "",
+            "year": "", "gpa": gpa,
+        }]
 
     TECH = [
         "Python", "JavaScript", "TypeScript", "React", "Vue", "Angular",
@@ -255,7 +302,7 @@ Extract all key information. Return ONLY this JSON structure:
   "work_type": "remote|hybrid|onsite",
   "salary_min": null,
   "salary_max": null,
-  "salary_currency": "USD",
+  "salary_currency": "INR",
   "required_skills": ["must-have skill"],
   "nice_to_have": ["preferred skill"],
   "experience_years": null,
@@ -265,7 +312,9 @@ Extract all key information. Return ONLY this JSON structure:
   "keywords": ["important keyword for ATS"],
   "culture": ["culture signal"],
   "apply_email": null
-}"""
+}
+Salary rule: express salary_min and salary_max as amounts in Indian Rupees per year, converting
+approximately when the posting quotes another currency, and always set salary_currency to "INR"."""
 
     result = await _json_chat(
         f"URL: {url}\n\nJob Description:\n{description[:5000]}",
@@ -293,7 +342,7 @@ def _fallback_parse_job(text: str) -> Dict[str, Any]:
 
     return {
         "title": "", "company": "", "location": "", "work_type": work_type,
-        "salary_min": s_min, "salary_max": s_max, "salary_currency": "USD",
+        "salary_min": s_min, "salary_max": s_max, "salary_currency": "INR",
         "required_skills": skills, "nice_to_have": [],
         "experience_years": None, "education_required": None,
         "responsibilities": [], "benefits": [], "keywords": skills,
@@ -357,6 +406,7 @@ async def generate_cover_letter(
     fit: Dict,
     tone: str = "professional",
     extra_context: str = "",
+    custom_instructions: str = "",
 ) -> str:
     name        = resume_parsed.get("name", "")
     exp         = resume_parsed.get("experience", [])
@@ -382,7 +432,7 @@ Writing rules (follow strictly):
 7. Total length: 180–240 words
 8. Tone: {tone}
 9. Sound human — vary sentence length, include one specific detail that shows you did your homework
-{WRITING_STANDARDS}
+{WRITING_STANDARDS}{_custom_instructions_block(custom_instructions)}
 Return ONLY the letter body. No subject line, no "Dear Hiring Manager" header, no sign-off."""
 
     prompt = f"""Write a cover letter for this candidate:
@@ -428,6 +478,8 @@ async def generate_email(
     fit: Dict,
     extra_context: str = "",
     knowledge_graph: Optional[Dict] = None,
+    resume_parsed: Optional[Dict] = None,
+    custom_instructions: str = "",
 ) -> Dict[str, str]:
     job_title    = job_parsed.get("title", "the role")
     company      = job_parsed.get("company", "the company")
@@ -440,28 +492,62 @@ async def generate_email(
     fit_pct      = fit.get("overall", 75)
     graph_context = _knowledge_graph_context(knowledge_graph)
 
+    rp = resume_parsed or {}
+    github_url   = rp.get("github") or ""
+    linkedin_url = rp.get("linkedin") or ""
+    project_lines = []
+    for pr in (rp.get("projects") or [])[:4]:
+        line = pr.get("name") or ""
+        if pr.get("description"):
+            line += f": {pr['description']}"
+        if pr.get("tech"):
+            line += f" (built with {', '.join(pr['tech'][:5])})"
+        if line.strip():
+            project_lines.append(line)
+    projects_block = "\n".join(f"- {p}" for p in project_lines)
+    exp = rp.get("experience") or []
+    current_role = f"{exp[0].get('title','')} at {exp[0].get('company','')}" if exp else ""
+    edu = (rp.get("education") or [{}])[0]
+    edu_line = " ".join(str(v) for v in [edu.get("degree"), edu.get("field"), edu.get("school")] if v)
+
     system = f"""You are a senior professional job email writer with deep experience getting candidates
 interviews at competitive companies. Every email you write is read closely against the exact job
 description it responds to, so it must be tightly and visibly aligned with what that role actually
 asks for, not a generic application anyone could send.
 
+The email body must follow this exact structure, in this order, as separate short paragraphs:
+1. A short professional greeting on its own line
+2. One paragraph where the candidate introduces themselves: name, current role or education, and
+   the two or three real skills that matter most for this exact job
+3. One paragraph introducing the candidate's real projects from the list below, each in one tight
+   sentence that connects the project to what this job actually asks for. Only use projects that
+   are listed, never invent one
+4. A short final note: one confident closing line with a clear, specific next step, and a mention
+   that the resume is attached to this email as a document
+5. A signature block, each item on its own line: the candidate's full name, then the GitHub link,
+   then the LinkedIn link. Include a link line only if that link is listed below
+
 Non negotiable rules:
 1. Read the required skills and responsibilities given below and mirror the two or three that matter
    most, using the candidate's real matched skills and fit, never a skill they do not have
 2. Subject line format: "Application for [Role Title], [Full Name]"
-3. Body: 3 to 4 sentences only, no filler, every sentence must connect a real fact about the
-   candidate to something specific this job actually asks for
+3. No filler anywhere, every sentence must connect a real fact about the candidate to something
+   specific this job actually asks for
 4. Do not say "I hope this email finds you well" or any other empty opener
 5. Sound like a real, thoughtful, confident professional wrote this personally for this one role,
    never like a template that got the company name swapped in
-6. End with a clear, specific next step
-{WRITING_STANDARDS}
+{WRITING_STANDARDS}{_custom_instructions_block(custom_instructions)}
 Return JSON: {{"subject": "...", "body": "..."}}"""
 
     prompt = f"""Write an application email about this exact job description, sent on the candidate's
 behalf to a recipient at the company.
 
 Candidate: {name}
+Current role or education: {current_role or edu_line}
+Candidate's GitHub link: {github_url or "(none on file)"}
+Candidate's LinkedIn link: {linkedin_url or "(none on file)"}
+Candidate's real projects:
+{projects_block or "(none on file)"}
 Role: {job_title} at {company}
 Fit score against this job description: {fit_pct:.0f} out of 100
 Candidate's matched skills for this job description: {matched or top_skill_str}
@@ -475,16 +561,37 @@ Extra context from the candidate: {extra_context}"""
     if result and result.get("subject"):
         return result
 
+    # Fallback mirrors the same structure the prompt demands: greeting,
+    # self introduction, projects, final note, then name and links.
+    intro = f"I am {name}"
+    if current_role:
+        intro += f", currently {current_role}"
+    elif edu_line:
+        intro += f", {edu_line}"
+    intro += f". My background in {top_skill_str} lines up directly with what this role asks for."
+
+    projects_sentence = ""
+    if project_lines:
+        first = project_lines[0].split(":")[0].strip()
+        projects_sentence = (
+            f"Among my projects, {first} shows this best, and my resume covers the rest in detail.\n\n"
+        )
+
+    signature = name
+    if github_url:
+        signature += f"\n{github_url}"
+    if linkedin_url:
+        signature += f"\n{linkedin_url}"
+
     return {
         "subject": f"Application for {job_title}, {name}",
         "body": (
-            f"Hi,\n\n"
-            f"I'm writing to apply for the {job_title} position at {company}. "
-            f"My background in {top_skill_str} is a direct match for what you've described. "
-            f"I've applied this in production settings with measurable results.\n\n"
-            f"I've attached my resume and cover letter. "
-            f"I'd be glad to jump on a quick call to discuss.\n\n"
-            f"Best,\n{name}"
+            f"Hello,\n\n"
+            f"{intro}\n\n"
+            f"{projects_sentence}"
+            f"My resume is attached to this email as a document. I would welcome a short call to "
+            f"discuss how I can contribute to {company} from day one.\n\n"
+            f"{signature}"
         )
     }
 
@@ -591,6 +698,7 @@ async def answer_form_questions(
     job_parsed: Optional[Dict],
     extra_context: str = "",
     knowledge_graph: Optional[Dict] = None,
+    custom_instructions: str = "",
 ) -> List[Dict[str, str]]:
     name     = resume_parsed.get("name", "the applicant")
     exp      = resume_parsed.get("experience", [])
@@ -671,9 +779,10 @@ Rules for every answer:
    facts like emails, links, or numbers, which should be answered with just that value
 5. Never use: "I am passionate about", "synergy", "leverage", "hard working", "team player"
 6. Sound genuine, confident, and direct
-7. If a question asks about salary, give a reasonable range based on industry norms
+7. If a question asks about salary, give a reasonable range in Indian Rupees based on industry
+   norms for that role in India, never in any other currency
 8. For "Why this company?", reference something specific about {company} (culture: {culture})
-{WRITING_STANDARDS}
+{WRITING_STANDARDS}{_custom_instructions_block(custom_instructions)}
 Return a JSON array, one object per question:
 [{{"question": "...", "answer": "..."}}]"""
 

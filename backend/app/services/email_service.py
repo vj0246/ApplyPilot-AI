@@ -18,8 +18,10 @@ import logging
 import socket
 import smtplib
 import ssl
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from typing import Optional
 
 log = logging.getLogger(__name__)
 
@@ -44,12 +46,23 @@ class _IPv4SMTP(smtplib.SMTP):
         return sock
 
 
-def _build_message(sender_email: str, recipient_email: str, subject: str, body: str) -> MIMEMultipart:
+def _build_message(
+    sender_email: str,
+    recipient_email: str,
+    subject: str,
+    body: str,
+    attachment_bytes: Optional[bytes] = None,
+    attachment_filename: Optional[str] = None,
+) -> MIMEMultipart:
     msg = MIMEMultipart()
     msg["From"] = sender_email
     msg["To"] = recipient_email
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain"))
+    if attachment_bytes and attachment_filename:
+        part = MIMEApplication(attachment_bytes, Name=attachment_filename)
+        part["Content-Disposition"] = f'attachment; filename="{attachment_filename}"'
+        msg.attach(part)
     return msg
 
 
@@ -76,8 +89,11 @@ def _send_sync(
     recipient_email: str,
     subject: str,
     body: str,
+    attachment_bytes: Optional[bytes] = None,
+    attachment_filename: Optional[str] = None,
 ) -> None:
-    msg = _build_message(sender_email, recipient_email, subject, body)
+    msg = _build_message(sender_email, recipient_email, subject, body,
+                         attachment_bytes, attachment_filename)
 
     # The port the user configured is tried first. If it hangs rather than
     # cleanly refusing, that is the signature of a network in between
@@ -126,6 +142,8 @@ async def send_email(
     recipient_email: str,
     subject: str,
     body: str,
+    attachment_bytes: Optional[bytes] = None,
+    attachment_filename: Optional[str] = None,
 ) -> None:
     # smtplib is blocking, so this runs on a worker thread instead of
     # tying up the event loop for the several seconds a real SMTP
@@ -134,4 +152,5 @@ async def send_email(
         _send_sync,
         smtp_host, smtp_port, smtp_username, smtp_password,
         sender_email, recipient_email, subject, body,
+        attachment_bytes, attachment_filename,
     )

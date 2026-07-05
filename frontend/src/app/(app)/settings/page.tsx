@@ -68,6 +68,51 @@ export default function SettingsPage() {
   const knowledgeGraph = profile?.knowledge_graph;
   const hasGraph = knowledgeGraph && (knowledgeGraph.identity || (knowledgeGraph.values || []).length > 0);
 
+  // ── Direct memory editing ────────────────────────────────────────
+  // The interview above only ever adds to the graph. This editor is the
+  // other half: open the stored memory as plain text, change or delete
+  // anything, and save exactly what is written, replacing what was there.
+  const [editingMemory, setEditingMemory] = useState(false);
+  const [memoryDraft, setMemoryDraft] = useState<Record<string, string>>({});
+
+  const LIST_FIELDS = ["values", "strengths", "motivations", "work_style", "goals"] as const;
+
+  const openMemoryEditor = () => {
+    const g: any = knowledgeGraph || {};
+    const draft: Record<string, string> = {
+      identity: g.identity || "",
+      communication_style: g.communication_style || "",
+      achievements: (g.achievements || [])
+        .map((a: any) => `${a.title || ""} :: ${a.summary || ""}`)
+        .join("\n"),
+    };
+    for (const f of LIST_FIELDS) draft[f] = (g[f] || []).join("\n");
+    setMemoryDraft(draft);
+    setEditingMemory(true);
+  };
+
+  const saveMemoryMut = useMutation({
+    mutationFn: () => {
+      const lines = (s: string) => s.split("\n").map(l => l.trim()).filter(Boolean);
+      const graph: Record<string, unknown> = {
+        identity: (memoryDraft.identity || "").trim(),
+        communication_style: (memoryDraft.communication_style || "").trim(),
+        achievements: lines(memoryDraft.achievements || "").map(l => {
+          const [title, ...rest] = l.split("::");
+          return { title: title.trim(), summary: rest.join("::").trim() };
+        }),
+      };
+      for (const f of LIST_FIELDS) graph[f] = lines(memoryDraft[f] || "");
+      return profileApi.editKnowledgeGraph(graph);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["profile"] });
+      setEditingMemory(false);
+      toast.success("Memory updated");
+    },
+    onError: (err: any) => toast.error(err.response?.data?.detail || "Could not save your memory"),
+  });
+
   // ── Email account ────────────────────────────────────────────────
   const [emailForm, setEmailForm] = useState({
     sender_email: "", smtp_host: "smtp.gmail.com", smtp_port: 587,
@@ -192,12 +237,12 @@ export default function SettingsPage() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="label">Min salary (USD)</label>
-                    <input {...register("salary_min")} type="number" placeholder="100000" className="input" />
+                    <label className="label">Min salary (Indian Rupees per year)</label>
+                    <input {...register("salary_min")} type="number" placeholder="800000" className="input" />
                   </div>
                   <div>
-                    <label className="label">Max salary (USD)</label>
-                    <input {...register("salary_max")} type="number" placeholder="160000" className="input" />
+                    <label className="label">Max salary (Indian Rupees per year)</label>
+                    <input {...register("salary_max")} type="number" placeholder="2000000" className="input" />
                   </div>
                 </div>
 
@@ -223,6 +268,20 @@ export default function SettingsPage() {
                       <span className="text-sm font-medium text-gray-800">{t}</span>
                     </label>
                   ))}
+                </div>
+                <div className="border-t border-gray-100 pt-4">
+                  <label className="label">Custom writing instructions</label>
+                  <p className="text-sm text-gray-500 mb-2">
+                    Written in your own words, applied to every email, cover letter, and form answer
+                    this tool writes for you. For example: always mention that I am open to
+                    relocation, keep every email under one hundred words, sign off with Warm regards.
+                  </p>
+                  <textarea
+                    {...register("custom_instructions")}
+                    rows={5}
+                    placeholder="Type any standing instruction about your tone or format here"
+                    className="input resize-none"
+                  />
                 </div>
                 <button type="submit" disabled={saveProfileMut.isPending} className="btn-primary">
                   {saveProfileMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save"}
@@ -279,6 +338,68 @@ export default function SettingsPage() {
                   {(knowledgeGraph?.goals || []).length > 0 && (
                     <p className="text-sm text-gray-700"><span className="font-medium">Goals: </span>{knowledgeGraph!.goals!.join(", ")}</p>
                   )}
+                  {!editingMemory && (
+                    <button onClick={openMemoryEditor} className="btn-secondary text-sm">
+                      Edit memory directly
+                    </button>
+                  )}
+                </Card>
+              )}
+
+              {editingMemory && (
+                <Card className="space-y-4">
+                  <h2 className="font-semibold text-gray-900">Edit your memory</h2>
+                  <p className="text-sm text-gray-500">
+                    Whatever you save here replaces the stored memory exactly. Remove a line to
+                    forget it, change a line to correct it. List fields take one item per line;
+                    achievements take one per line as Title :: what happened.
+                  </p>
+                  <div>
+                    <label className="label">Identity, one sentence</label>
+                    <input
+                      value={memoryDraft.identity || ""}
+                      onChange={(e) => setMemoryDraft((d) => ({ ...d, identity: e.target.value }))}
+                      className="input"
+                    />
+                  </div>
+                  {LIST_FIELDS.map((f) => (
+                    <div key={f}>
+                      <label className="label capitalize">{f.replace("_", " ")}, one per line</label>
+                      <Textarea
+                        value={memoryDraft[f] || ""}
+                        onChange={(e) => setMemoryDraft((d) => ({ ...d, [f]: e.target.value }))}
+                        rows={3}
+                      />
+                    </div>
+                  ))}
+                  <div>
+                    <label className="label">Achievements, one per line as Title :: summary</label>
+                    <Textarea
+                      value={memoryDraft.achievements || ""}
+                      onChange={(e) => setMemoryDraft((d) => ({ ...d, achievements: e.target.value }))}
+                      rows={4}
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Communication style</label>
+                    <input
+                      value={memoryDraft.communication_style || ""}
+                      onChange={(e) => setMemoryDraft((d) => ({ ...d, communication_style: e.target.value }))}
+                      className="input"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => saveMemoryMut.mutate()}
+                      disabled={saveMemoryMut.isPending}
+                      className="btn-primary"
+                    >
+                      {saveMemoryMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save memory"}
+                    </button>
+                    <button onClick={() => setEditingMemory(false)} className="btn-secondary">
+                      Cancel
+                    </button>
+                  </div>
                 </Card>
               )}
 

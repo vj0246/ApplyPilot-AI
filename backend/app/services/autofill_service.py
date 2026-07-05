@@ -234,6 +234,7 @@ async def get_answers_for_fields(
     job_parsed: Optional[Dict],
     extra_context: str = "",
     knowledge_graph: Optional[Dict] = None,
+    custom_instructions: str = "",
 ) -> List[FilledField]:
     questions_for_ai = []
     for f in fields:
@@ -252,6 +253,7 @@ async def get_answers_for_fields(
         job_parsed=job_parsed,
         extra_context=extra_context,
         knowledge_graph=knowledge_graph,
+        custom_instructions=custom_instructions,
     )
 
     filled: List[FilledField] = []
@@ -551,6 +553,7 @@ async def run_autofill(
     job_parsed: Optional[Dict],
     extra_context: str = "",
     knowledge_graph: Optional[Dict] = None,
+    custom_instructions: str = "",
 ) -> Dict[str, Any]:
     is_google = is_google_form_url(form_url)
     is_microsoft = is_microsoft_form_url(form_url)
@@ -608,7 +611,8 @@ async def run_autofill(
                 )
 
             filled = await get_answers_for_fields(
-                fields, resume_parsed, job_parsed, extra_context, knowledge_graph
+                fields, resume_parsed, job_parsed, extra_context, knowledge_graph,
+                custom_instructions,
             )
             if is_google:
                 await fill_google_form(page, filled)

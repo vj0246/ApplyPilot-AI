@@ -93,6 +93,7 @@ async def create_draft(
     res = await db.execute(select(Profile).where(Profile.user_id == u.id))
     profile = res.scalar_one_or_none()
     knowledge_graph = (profile.knowledge_graph if profile else None) or None
+    custom_instructions = (profile.custom_instructions if profile else None) or ""
 
     fit = await ai_service.analyze_fit(resume.parsed_data or {}, job_parsed)
     name = (resume.parsed_data or {}).get("name") or u.full_name or ""
@@ -102,6 +103,8 @@ async def create_draft(
         fit=fit,
         extra_context=body.extra_context,
         knowledge_graph=knowledge_graph,
+        resume_parsed=resume.parsed_data or {},
+        custom_instructions=custom_instructions,
     )
 
     e = EmailSend(
@@ -175,6 +178,31 @@ async def send_email_now(
             "settings before sending.",
         )
 
+    # The resume goes out attached to every application email, no
+    # exceptions — an application email without the resume document is a
+    # worse first impression than no email at all. If the stored file is
+    # gone (the upload disk on the host is wiped on every redeploy), the
+    # send is refused with a clear ask to upload the resume again rather
+    # than quietly sending without it.
+    attachment_bytes = None
+    attachment_filename = None
+    if e.resume_id:
+        resume = await db.get(Resume, e.resume_id)
+        if resume and resume.file_path:
+            try:
+                with open(resume.file_path, "rb") as fh:
+                    attachment_bytes = fh.read()
+                attachment_filename = resume.filename or "resume.pdf"
+            except OSError:
+                pass
+    if not attachment_bytes:
+        raise HTTPException(
+            422,
+            "The resume file for this draft is not available on the server anymore, and every "
+            "application email must carry the resume attached as a document. Upload your resume "
+            "again, create a new draft, and send that one.",
+        )
+
     try:
         password = crypto.decrypt(profile.smtp_password_encrypted)
         await email_service.send_email(
@@ -186,6 +214,8 @@ async def send_email_now(
             recipient_email=e.recipient_email,
             subject=e.subject,
             body=e.body,
+            attachment_bytes=attachment_bytes,
+            attachment_filename=attachment_filename,
         )
         e.status = "sent"
         e.sent_at = datetime.now(timezone.utc)

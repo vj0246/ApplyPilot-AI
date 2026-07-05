@@ -50,6 +50,11 @@ class Profile(Base):
     # answer and email so the writing is grounded in who they actually are.
     knowledge_graph: Mapped[Optional[dict]] = mapped_column(JSONB, default=dict)
 
+    # Free text the user writes themselves about how they want everything
+    # written for them: tone, format, phrases to prefer or avoid. Appended
+    # to every AI writing prompt after the app's own writing standards.
+    custom_instructions: Mapped[Optional[str]] = mapped_column(Text)
+
     # The user's own mailbox, used to send the job application email as
     # them, not as this app. smtp_password_encrypted is a Fernet token, the
     # plain app password is never stored and never leaves this column

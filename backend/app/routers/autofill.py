@@ -109,6 +109,7 @@ async def _run(run_id: str, form_url: str, extra_context: str):
         res = await db.execute(select(Profile).where(Profile.user_id == run.user_id))
         profile = res.scalar_one_or_none()
         knowledge_graph = (profile.knowledge_graph if profile else None) or None
+        custom_instructions = (profile.custom_instructions if profile else None) or ""
 
         try:
             result = await autofill_service.run_autofill(
@@ -117,6 +118,7 @@ async def _run(run_id: str, form_url: str, extra_context: str):
                 job_parsed=job_parsed,
                 extra_context=extra_context,
                 knowledge_graph=knowledge_graph,
+                custom_instructions=custom_instructions,
             )
             run.status = "ready"
             run.result = result

@@ -32,6 +32,7 @@ export interface Profile {
   tone_preference: string;
   skills: string[];
   onboarding_done: boolean;
+  custom_instructions?: string;
   knowledge_graph?: KnowledgeGraph;
   email_account_configured?: boolean;
   sender_email?: string;

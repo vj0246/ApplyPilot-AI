@@ -120,19 +120,25 @@ async def _generate(aid: str, uid: str, extra_context: str):
             jp = job.parsed_data or {}
             pp = {"skills": prof.skills or []} if prof else {}
             tone = prof.tone_preference if prof else "professional"
+            custom_instructions = (prof.custom_instructions if prof else None) or ""
 
             fit = await ai_service.analyze_fit(rp, jp, pp)
             a.fit_score    = fit["overall"]
             a.fit_breakdown = fit
             a.skill_gaps   = fit.get("gaps", [])
 
-            a.cover_letter = await ai_service.generate_cover_letter(rp, jp, fit, tone, extra_context)
+            a.cover_letter = await ai_service.generate_cover_letter(
+                rp, jp, fit, tone, extra_context, custom_instructions=custom_instructions
+            )
 
             # resume parsing sometimes misses the name (bad PDF layout) —
             # fall back to the account name so the email isn't blank
             user = await db.get(User, uuid.UUID(uid))
             name = rp.get("name") or (user.full_name if user else "")
-            email_data = await ai_service.generate_email(name, jp, fit, extra_context)
+            email_data = await ai_service.generate_email(
+                name, jp, fit, extra_context,
+                resume_parsed=rp, custom_instructions=custom_instructions,
+            )
             a.email_subject = email_data.get("subject", "")
             a.email_body    = email_data.get("body", "")
 
@@ -184,11 +190,16 @@ async def answer_questions(
         if j and j.user_id == u.id:
             job_parsed = j.parsed_data
 
+    pres = await db.execute(select(Profile).where(Profile.user_id == u.id))
+    prof = pres.scalar_one_or_none()
+
     answers = await ai_service.answer_form_questions(
         questions=body.questions,
         resume_parsed=resume.parsed_data or {},
         job_parsed=job_parsed,
         extra_context=body.extra_context,
+        knowledge_graph=(prof.knowledge_graph if prof else None) or None,
+        custom_instructions=(prof.custom_instructions if prof else None) or "",
     )
     return {"answers": answers}
 

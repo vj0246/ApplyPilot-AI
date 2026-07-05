@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     skills           TEXT[] DEFAULT '{}',
     onboarding_done  BOOLEAN DEFAULT FALSE,
     knowledge_graph  JSONB DEFAULT '{}',
+    custom_instructions TEXT,
     sender_email     VARCHAR(320),
     smtp_host        VARCHAR(255),
     smtp_port        INTEGER,

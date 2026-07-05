@@ -48,6 +48,8 @@ export const profileApi = {
   knowledgeGraphQuestions: () => api.get("/profile/knowledge-graph/questions"),
   buildKnowledgeGraph: (answers: { question: string; answer: string }[]) =>
     api.post("/profile/knowledge-graph", { answers }, { timeout: 60_000 }),
+  editKnowledgeGraph: (knowledge_graph: Record<string, unknown>) =>
+    api.put("/profile/knowledge-graph", { knowledge_graph }),
   setEmailCredentials: (d: {
     sender_email: string; smtp_host: string; smtp_port: number;
     smtp_username: string; smtp_password: string;
