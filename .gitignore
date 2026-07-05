@@ -38,3 +38,7 @@ backend/uploads/
 # Logs
 *.log
 logs/
+
+# local probe/scratch files
+backend/*.txt
+backend/run_status.json
