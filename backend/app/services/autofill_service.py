@@ -242,6 +242,7 @@ async def get_answers_for_fields(
     extra_context: str = "",
     knowledge_graph: Optional[Dict] = None,
     custom_instructions: str = "",
+    learned_answers: Optional[List[Dict[str, str]]] = None,
 ) -> List[FilledField]:
     # Each question carries a hint about the widget it goes into, because
     # the model can't see the page: a one line text box answered with a
@@ -268,6 +269,7 @@ async def get_answers_for_fields(
         extra_context=extra_context,
         knowledge_graph=knowledge_graph,
         custom_instructions=custom_instructions,
+        learned_answers=learned_answers,
     )
 
     filled: List[FilledField] = []
@@ -559,6 +561,33 @@ def build_prefilled_url(form_url: str, form_fields: List[FormField], filled: Lis
     return urlunsplit((split.scheme, split.netloc, split.path, new_query, split.fragment))
 
 
+def rebuild_prefilled_url(form_url: str, field_dicts: List[Dict[str, Any]]) -> Optional[str]:
+    """Same as build_prefilled_url, but working from the plain dicts a
+    finished run stores in its result — this is what runs when someone
+    edits an answer on the site after the browser that filled the form is
+    long gone. The stored entry ids are the only thing needed to mint a
+    fresh pre-filled link with the edited answers."""
+    params: List[tuple] = []
+    for f in field_dicts:
+        entry_id = f.get("entry_id")
+        answer = (f.get("answer") or "").strip()
+        if not entry_id or not answer:
+            continue
+        if f.get("field_type") == "checkbox":
+            for value in [v.strip() for v in answer.split(",") if v.strip()]:
+                params.append((f"entry.{entry_id}", value))
+        else:
+            params.append((f"entry.{entry_id}", answer))
+
+    if not params:
+        return None
+
+    split = urlsplit(form_url)
+    existing = parse_qsl(split.query, keep_blank_values=True)
+    new_query = urlencode(existing + params, doseq=False)
+    return urlunsplit((split.scheme, split.netloc, split.path, new_query, split.fragment))
+
+
 # ── Orchestration ─────────────────────────────────────────────────────────
 
 async def run_autofill(
@@ -568,6 +597,7 @@ async def run_autofill(
     extra_context: str = "",
     knowledge_graph: Optional[Dict] = None,
     custom_instructions: str = "",
+    learned_answers: Optional[List[Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     is_google = is_google_form_url(form_url)
     is_microsoft = is_microsoft_form_url(form_url)
@@ -626,7 +656,7 @@ async def run_autofill(
 
             filled = await get_answers_for_fields(
                 fields, resume_parsed, job_parsed, extra_context, knowledge_graph,
-                custom_instructions,
+                custom_instructions, learned_answers,
             )
             if is_google:
                 await fill_google_form(page, filled)
@@ -644,13 +674,22 @@ async def run_autofill(
             # the plain form_url as it always has.
             prefilled_url = build_prefilled_url(form_url, fields, filled) if is_google else None
 
+            # entry ids and options ride along in the stored result so an
+            # answer edited on the site later can be rebuilt into a fresh
+            # pre-filled link, and a choice field can validate the edit
+            # against the real options, without reopening the form.
+            entry_by_index = {f.index: f.entry_id for f in fields}
+            options_by_index = {f.index: f.options for f in fields}
             return {
                 "title": scraped["title"],
                 "form_url": form_url,
                 "prefilled_url": prefilled_url,
                 "fields": [
                     {"question": f.question, "field_type": f.field_type,
-                     "answer": f.answer, "confidence": f.confidence}
+                     "answer": f.answer, "confidence": f.confidence,
+                     "index": f.index,
+                     "entry_id": entry_by_index.get(f.index),
+                     "options": options_by_index.get(f.index) or []}
                     for f in filled
                 ],
                 "unfilled_count": unfilled,

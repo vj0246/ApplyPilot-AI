@@ -200,6 +200,7 @@ async def answer_questions(
         extra_context=body.extra_context,
         knowledge_graph=(prof.knowledge_graph if prof else None) or None,
         custom_instructions=(prof.custom_instructions if prof else None) or "",
+        learned_answers=(prof.learned_answers if prof else None) or None,
     )
     return {"answers": answers}
 

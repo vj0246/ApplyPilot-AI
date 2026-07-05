@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     onboarding_done  BOOLEAN DEFAULT FALSE,
     knowledge_graph  JSONB DEFAULT '{}',
     custom_instructions TEXT,
+    learned_answers  JSONB DEFAULT '[]',
     sender_email     VARCHAR(320),
     smtp_host        VARCHAR(255),
     smtp_port        INTEGER,

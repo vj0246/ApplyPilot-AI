@@ -55,6 +55,13 @@ class Profile(Base):
     # to every AI writing prompt after the app's own writing standards.
     custom_instructions: Mapped[Optional[str]] = mapped_column(Text)
 
+    # Answers the person corrected by hand on a filled form, newest first,
+    # as [{"question": ..., "answer": ...}]. The human in the loop signal:
+    # a correction someone typed themselves beats anything generated, so
+    # when a future form asks the same or a clearly similar question, the
+    # corrected answer is offered to the model as the preferred one.
+    learned_answers: Mapped[Optional[list]] = mapped_column(JSONB, default=list)
+
     # The user's own mailbox, used to send the job application email as
     # them, not as this app. smtp_password_encrypted is a Fernet token, the
     # plain app password is never stored and never leaves this column

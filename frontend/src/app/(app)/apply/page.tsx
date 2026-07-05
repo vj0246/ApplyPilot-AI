@@ -111,7 +111,7 @@ function ApplyPageInner() {
       job_id: gfJobId || undefined,
       extra_context: gfContext,
     }),
-    onSuccess: ({ data }) => { setRunId(data.id); toast.success("Opening the form..."); },
+    onSuccess: ({ data }) => { setRunId(data.id); setEditedAnswers({}); toast.success("Opening the form..."); },
     onError: (err: any) => toast.error(err.response?.data?.detail || "Couldn't start autofill"),
   });
 
@@ -126,6 +126,36 @@ function ApplyPageInner() {
   const isReady = runData?.status === "ready";
   const isFailed = runData?.status === "failed";
   const result = runData?.result;
+
+  // Inline answer editing. Edits live here keyed by field index until
+  // saved; saving sends only the changed ones, gets back a fresh
+  // pre-filled link carrying them, and teaches the profile the
+  // corrections so future forms reuse what the person actually wrote.
+  const [editedAnswers, setEditedAnswers] = useState<Record<number, string>>({});
+  const dirtyCount = result
+    ? Object.entries(editedAnswers).filter(([idx, v]) => {
+        const f = (result.fields || []).find((x: any) => x.index === Number(idx));
+        return f && v !== (f.answer || "");
+      }).length
+    : 0;
+
+  const saveAnswersMut = useMutation({
+    mutationFn: () => {
+      const changed = Object.entries(editedAnswers)
+        .filter(([idx, v]) => {
+          const f = (result.fields || []).find((x: any) => x.index === Number(idx));
+          return f && v !== (f.answer || "");
+        })
+        .map(([idx, v]) => ({ index: Number(idx), answer: v }));
+      return autofillApi.editAnswers(runId!, changed);
+    },
+    onSuccess: () => {
+      setEditedAnswers({});
+      qc.invalidateQueries({ queryKey: ["autofill", runId] });
+      toast.success("Answers updated, the pre-filled link now carries your edits, and they were saved to your memory for next time");
+    },
+    onError: (err: any) => toast.error(err.response?.data?.detail || "Could not save your edits"),
+  });
 
   // ── Application email ─────────────────────────────────────────────
   // A job description can be pasted straight into this flow, or an
@@ -513,22 +543,90 @@ function ApplyPageInner() {
               )}
 
               <div className="space-y-2 pt-2 border-t border-gray-100">
-                <p className="text-sm font-semibold text-gray-900 pt-3">What was filled in</p>
-                {result.fields.map((f: any, i: number) => (
-                  <div key={i} className="bg-gray-50 rounded-lg p-3 border border-gray-100 flex items-start gap-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-indigo-600 mb-1">{f.question}</p>
-                      <p className="text-sm text-gray-700">{f.answer || <span className="italic text-gray-400">Not filled — fill manually</span>}</p>
-                    </div>
-                    <Badge className={cn(
-                      f.confidence === "high" ? "bg-emerald-50 text-emerald-700" :
-                      f.confidence === "low" ? "bg-yellow-50 text-yellow-700" :
-                      "bg-gray-100 text-gray-600"
+                <div className="flex items-center justify-between pt-3">
+                  <p className="text-sm font-semibold text-gray-900">Review and edit the answers</p>
+                  {dirtyCount > 0 && (
+                    <button
+                      onClick={() => saveAnswersMut.mutate()}
+                      disabled={saveAnswersMut.isPending}
+                      className="btn-primary text-sm"
+                    >
+                      {saveAnswersMut.isPending
+                        ? <Loader2 className="w-4 h-4 animate-spin" />
+                        : <>Save {dirtyCount} edit{dirtyCount > 1 ? "s" : ""} & rebuild link</>}
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500">
+                  Change anything below, then save. The pre-filled link above updates to carry your
+                  edits, and every correction is remembered, the next form that asks the same thing
+                  gets your answer, not a fresh guess.
+                </p>
+                {result.fields.map((f: any, i: number) => {
+                  // runs stored before answers became editable have no
+                  // index on their fields — those stay read only
+                  const editable = typeof f.index === "number";
+                  const edited = editable && editedAnswers[f.index] !== undefined
+                    ? editedAnswers[f.index]
+                    : (f.answer || "");
+                  const isDirty = editable && edited !== (f.answer || "");
+                  const hasOptions = (f.options || []).length > 0;
+                  if (!editable) {
+                    return (
+                      <div key={i} className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                        <p className="text-xs font-semibold text-indigo-600 mb-1">{f.question}</p>
+                        <p className="text-sm text-gray-700">{f.answer || <span className="italic text-gray-400">Not filled</span>}</p>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={f.index} className={cn(
+                      "rounded-lg p-3 border flex items-start gap-3",
+                      isDirty ? "bg-indigo-50/50 border-indigo-200" : "bg-gray-50 border-gray-100"
                     )}>
-                      {f.confidence}
-                    </Badge>
-                  </div>
-                ))}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-indigo-600 mb-1.5">{f.question}</p>
+                        {(f.field_type === "radio" || f.field_type === "dropdown") && hasOptions ? (
+                          <select
+                            value={edited}
+                            onChange={(e) => setEditedAnswers(a => ({ ...a, [f.index]: e.target.value }))}
+                            className="input text-sm"
+                          >
+                            <option value="">Leave blank, pick on the form myself</option>
+                            {f.options.map((o: string) => <option key={o} value={o}>{o}</option>)}
+                          </select>
+                        ) : f.field_type === "paragraph" ? (
+                          <Textarea
+                            value={edited}
+                            onChange={(e) => setEditedAnswers(a => ({ ...a, [f.index]: e.target.value }))}
+                            rows={3}
+                            className="text-sm bg-white"
+                          />
+                        ) : (
+                          <input
+                            value={edited}
+                            onChange={(e) => setEditedAnswers(a => ({ ...a, [f.index]: e.target.value }))}
+                            placeholder="Not filled, type your answer or fill it on the form"
+                            className="input text-sm bg-white"
+                          />
+                        )}
+                        {f.field_type === "checkbox" && hasOptions && (
+                          <p className="text-[11px] text-gray-400 mt-1">
+                            Choices, comma separated: {f.options.join(", ")}
+                          </p>
+                        )}
+                      </div>
+                      <Badge className={cn(
+                        isDirty ? "bg-indigo-100 text-indigo-700" :
+                        f.confidence === "high" ? "bg-emerald-50 text-emerald-700" :
+                        f.confidence === "low" ? "bg-yellow-50 text-yellow-700" :
+                        "bg-gray-100 text-gray-600"
+                      )}>
+                        {isDirty ? "edited" : f.confidence}
+                      </Badge>
+                    </div>
+                  );
+                })}
               </div>
 
               <p className="text-xs text-gray-400 pt-2 border-t border-gray-100">

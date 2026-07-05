@@ -103,6 +103,8 @@ export const autofillApi = {
   start: (d: { form_url: string; resume_id: string; job_id?: string; extra_context?: string }) =>
     api.post("/autofill/form", d, { timeout: 90_000 }),
   get: (id: string) => api.get(`/autofill/${id}`),
+  editAnswers: (id: string, answers: { index: number; answer: string }[]) =>
+    api.patch(`/autofill/${id}/answers`, { answers }),
 };
 
 // ── Application email ────────────────────────────────────────────────

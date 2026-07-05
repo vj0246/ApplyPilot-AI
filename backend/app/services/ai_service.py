@@ -713,6 +713,7 @@ async def answer_form_questions(
     extra_context: str = "",
     knowledge_graph: Optional[Dict] = None,
     custom_instructions: str = "",
+    learned_answers: Optional[List[Dict[str, str]]] = None,
 ) -> List[Dict[str, str]]:
     name     = resume_parsed.get("name", "the applicant")
     exp      = resume_parsed.get("experience", [])
@@ -760,6 +761,26 @@ async def answer_form_questions(
 
     certifications = ", ".join((resume_parsed.get("certifications") or [])[:5])
 
+    # Answers the person typed or corrected themselves on earlier forms.
+    # A hand written correction is the strongest grounding signal there
+    # is — the person literally showed what they want said — so it is
+    # given to the model as the preferred answer whenever a question
+    # matches. Newest first, capped so the prompt doesn't grow unbounded.
+    learned_block = ""
+    if learned_answers:
+        learned_lines = [
+            f"Q: {la.get('question','')}\nTheir own answer: {la.get('answer','')}"
+            for la in learned_answers[:20]
+            if la.get("question") and la.get("answer")
+        ]
+        if learned_lines:
+            learned_block = (
+                "\nAnswers this person has personally written or corrected on earlier forms. When a "
+                "question below asks the same thing or clearly the same kind of thing, reuse their own "
+                "answer, adapted only as much as the new question requires:\n"
+                + "\n".join(learned_lines) + "\n"
+            )
+
     system = f"""You are helping {name} fill in a job application for {jt} at {company}, section by
 section, question by question. You are reading the whole form the way a thoughtful human
 assistant would, not answering each question in isolation.
@@ -776,6 +797,7 @@ Grounding facts about {name}:
 - Technical skills: {skills}
 - Extra context: {extra_context}
 {graph_context}
+{learned_block}
 
 Rules for every answer:
 1. Be specific, use real facts from the candidate's background above
