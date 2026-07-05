@@ -1,4 +1,4 @@
-.PHONY: help start stop reset logs seed status
+.PHONY: help start stop reset logs status
 
 help:
 	@echo ""
@@ -8,7 +8,6 @@ help:
 	@echo "  make stop     Stop all containers"
 	@echo "  make reset    Wipe data + restart fresh"
 	@echo "  make logs     Live logs"
-	@echo "  make seed     Load demo data"
 	@echo "  make status   Show container status"
 	@echo ""
 
@@ -32,8 +31,6 @@ reset:
 logs:
 	docker compose logs -f --tail=50
 
-seed:
-	docker compose exec backend python seed.py
 
 status:
 	docker compose ps

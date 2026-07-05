@@ -61,11 +61,6 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-100 text-xs text-gray-500">
-            <p className="font-medium text-gray-700 mb-0.5">Demo account</p>
-            <p>demo@applypilot.dev / Demo1234!</p>
-          </div>
-
           <p className="text-center text-gray-500 text-sm mt-5">
             No account?{" "}
             <Link href="/auth/register" className="text-indigo-600 font-medium hover:text-indigo-700">

@@ -202,8 +202,7 @@ Get a free Groq key at [console.groq.com](https://console.groq.com)
 docker compose up -d
 ```
 
-Open `http://localhost:3000`. Demo login (run `make seed` first):
-`demo@applypilot.dev` / `Demo1234!`
+Open `http://localhost:3000` and create an account.
 
 ---
 
