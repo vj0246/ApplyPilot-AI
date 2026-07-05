@@ -619,6 +619,9 @@ Return ONLY this JSON structure:
   "work_style": ["how they operate day to day"],
   "achievements": [{{"title": "short label", "summary": "what happened and why it mattered"}}],
   "goals": ["a stated or clearly implied goal"],
+  "knowledge_areas": ["a subject or field they clearly know well, from anything they said"],
+  "interests": ["something they are genuinely interested in, inside or outside work"],
+  "priorities": ["something they clearly put first when making decisions"],
   "communication_style": "a short description of how they naturally express themselves"
 }}
 {WRITING_STANDARDS}"""
@@ -627,7 +630,9 @@ Return ONLY this JSON structure:
     result = await _json_chat(f"Build the knowledge graph from these answers:\n\n{qa_formatted}", system)
     return result if result else {
         "identity": "", "values": [], "strengths": [], "motivations": [],
-        "work_style": [], "achievements": [], "goals": [], "communication_style": "",
+        "work_style": [], "achievements": [], "goals": [],
+        "knowledge_areas": [], "interests": [], "priorities": [],
+        "communication_style": "",
     }
 
 
@@ -659,6 +664,9 @@ def merge_knowledge_graph(old: Optional[Dict], new: Dict) -> Dict:
         "work_style": _merge_list("work_style"),
         "achievements": list(merged_achievements.values()),
         "goals": _merge_list("goals"),
+        "knowledge_areas": _merge_list("knowledge_areas"),
+        "interests": _merge_list("interests"),
+        "priorities": _merge_list("priorities"),
         "communication_style": new.get("communication_style") or old.get("communication_style") or "",
     }
 
@@ -683,6 +691,12 @@ def _knowledge_graph_context(knowledge_graph: Optional[Dict]) -> str:
         lines.append("Personal stories: " + "; ".join(f"{a.get('title','')}, {a.get('summary','')}" for a in top))
     if g.get("goals"):
         lines.append(f"What they are working toward: {', '.join(g['goals'][:3])}")
+    if g.get("knowledge_areas"):
+        lines.append(f"What they know deeply: {', '.join(g['knowledge_areas'][:5])}")
+    if g.get("interests"):
+        lines.append(f"What genuinely interests them: {', '.join(g['interests'][:5])}")
+    if g.get("priorities"):
+        lines.append(f"What they put first: {', '.join(g['priorities'][:3])}")
     if g.get("communication_style"):
         lines.append(f"How they naturally speak: {g['communication_style']}")
     return "Knowledge graph of the candidate as a person, drawn from their own words:\n" + "\n".join(lines) if lines else ""

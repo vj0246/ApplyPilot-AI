@@ -1,7 +1,7 @@
 "use client";
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import {
   Zap, FileText, Briefcase, Loader2, MessageSquare,
@@ -11,10 +11,39 @@ import { resumeApi, jobApi, appApi, autofillApi, emailApi } from "@/lib/api";
 import { Card, Badge, Textarea } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
+type ApplyTab = "generate" | "formfill" | "googleform" | "email";
+const APPLY_TABS: ApplyTab[] = ["generate", "formfill", "googleform", "email"];
+
 export default function ApplyPage() {
+  // useSearchParams needs a Suspense boundary to prerender, so the page
+  // is a thin shell around the real component.
+  return (
+    <Suspense fallback={null}>
+      <ApplyPageInner />
+    </Suspense>
+  );
+}
+
+function ApplyPageInner() {
   const router = useRouter();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<"generate" | "formfill" | "googleform" | "email">("generate");
+
+  // The tab lives in the URL so the sidebar's "Fill a Form" and "Mail an
+  // Application" entries are real destinations someone can land on and
+  // link to, not just internal state. Form autofill is the default
+  // because it is the main thing this product does.
+  const searchParams = useSearchParams();
+  const urlTab = searchParams.get("tab");
+  const [tab, setTabState] = useState<ApplyTab>(
+    APPLY_TABS.includes(urlTab as ApplyTab) ? (urlTab as ApplyTab) : "googleform"
+  );
+  useEffect(() => {
+    if (APPLY_TABS.includes(urlTab as ApplyTab)) setTabState(urlTab as ApplyTab);
+  }, [urlTab]);
+  const setTab = (t: ApplyTab) => {
+    setTabState(t);
+    router.replace(`/apply?tab=${t}`, { scroll: false });
+  };
 
   // ── Data ──────────────────────────────────────────────────
   const { data: resumesData } = useQuery({
@@ -149,23 +178,26 @@ export default function ApplyPage() {
   return (
     <div className="p-8 max-w-3xl">
       <div className="page-header">
-        <h1 className="page-title">Apply / Generate</h1>
-        <p className="page-desc">Generate a full application or get answers to any form question</p>
+        <h1 className="page-title">Apply</h1>
+        <p className="page-desc">
+          Paste a form link and it gets filled in for you, or paste a job description and a real
+          application email goes out from your own address, resume attached
+        </p>
       </div>
 
-      {/* Tabs */}
+      {/* Tabs — the two main actions first, the extra tools after */}
       <div className="flex gap-2 mb-6 flex-wrap">
-        <TabBtn active={tab === "generate"} onClick={() => setTab("generate")} icon={Sparkles}>
-          Generate Application
-        </TabBtn>
-        <TabBtn active={tab === "formfill"} onClick={() => setTab("formfill")} icon={MessageSquare}>
-          Form Question Filler
-        </TabBtn>
         <TabBtn active={tab === "googleform"} onClick={() => setTab("googleform")} icon={Link2}>
-          Form Autofill
+          Fill a Form
         </TabBtn>
         <TabBtn active={tab === "email"} onClick={() => setTab("email")} icon={Send}>
-          Mail the Job Description
+          Mail an Application
+        </TabBtn>
+        <TabBtn active={tab === "generate"} onClick={() => setTab("generate")} icon={Sparkles}>
+          Full Application Kit
+        </TabBtn>
+        <TabBtn active={tab === "formfill"} onClick={() => setTab("formfill")} icon={MessageSquare}>
+          Answer Any Question
         </TabBtn>
       </div>
 

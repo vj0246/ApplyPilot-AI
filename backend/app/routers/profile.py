@@ -26,6 +26,9 @@ KNOWLEDGE_GRAPH_QUESTIONS = [
     "What drives you to keep doing this kind of work?",
     "How do people who work closely with you tend to describe you?",
     "What are you working toward over the next few years?",
+    "What subjects or fields do you know most deeply, and how did you get there?",
+    "What genuinely interests you, inside or outside of work?",
+    "When you have to choose, what do you put first, and what does that say about your priorities?",
 ]
 
 

@@ -1,9 +1,10 @@
 "use client";
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import toast from "react-hot-toast";
-import { User, Briefcase, Sliders, Loader2, BrainCircuit, Mail, CheckCircle2 } from "lucide-react";
+import { User, Briefcase, Sliders, Loader2, BrainCircuit, Mail, CheckCircle2, Plus, Trash2 } from "lucide-react";
 import { profileApi, authApi } from "@/lib/api";
 import { Card, Textarea } from "@/components/ui";
 import { cn } from "@/lib/utils";
@@ -13,7 +14,7 @@ const TABS = [
   { id: "account",     label: "Account",     icon: User },
   { id: "preferences", label: "Job Preferences", icon: Briefcase },
   { id: "ai",          label: "AI Settings", icon: Sliders },
-  { id: "knowledge",   label: "Knowledge Graph", icon: BrainCircuit },
+  { id: "knowledge",   label: "My Memory", icon: BrainCircuit },
   { id: "email",       label: "Email Account", icon: Mail },
 ];
 
@@ -22,7 +23,26 @@ const TONES = ["professional", "formal", "conversational", "technical", "enthusi
 const WORK_TYPES = ["remote", "hybrid", "onsite"];
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState("account");
+  // useSearchParams needs a Suspense boundary to prerender, so the page
+  // is a thin shell around the real component.
+  return (
+    <Suspense fallback={null}>
+      <SettingsPageInner />
+    </Suspense>
+  );
+}
+
+function SettingsPageInner() {
+  const searchParams = useSearchParams();
+  const urlTab = searchParams.get("tab");
+  const [tab, setTab] = useState(
+    TABS.some(t => t.id === urlTab) ? (urlTab as string) : "account"
+  );
+  // Sidebar links can change the tab query parameter while this page is
+  // already mounted, and the state initializer above only runs once.
+  useEffect(() => {
+    if (TABS.some(t => t.id === urlTab)) setTab(urlTab as string);
+  }, [urlTab]);
   const qc = useQueryClient();
   const { user, logout } = useAuth();
 
@@ -54,16 +74,32 @@ export default function SettingsPage() {
   });
   const [kgAnswers, setKgAnswers] = useState<Record<string, string>>({});
 
+  // On top of the fixed interview, anyone can teach their memory
+  // anything by writing their own question and answering it — "What
+  // languages do I speak", "What do I refuse to compromise on". The
+  // backend treats these exactly like the fixed questions and folds the
+  // answers into the same graph.
+  const [customPairs, setCustomPairs] = useState<{ question: string; answer: string }[]>([]);
+
   const buildGraphMut = useMutation({
     mutationFn: () =>
-      profileApi.buildKnowledgeGraph(
-        Object.entries(kgAnswers)
+      profileApi.buildKnowledgeGraph([
+        ...Object.entries(kgAnswers)
           .filter(([, answer]) => answer.trim())
-          .map(([question, answer]) => ({ question, answer }))
-      ),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["profile"] }); toast.success("Knowledge graph built from your answers"); },
-    onError: (err: any) => toast.error(err.response?.data?.detail || "Could not build the knowledge graph"),
+          .map(([question, answer]) => ({ question, answer })),
+        ...customPairs.filter(p => p.question.trim() && p.answer.trim()),
+      ]),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["profile"] });
+      setCustomPairs([]);
+      toast.success("Your memory grew from these answers");
+    },
+    onError: (err: any) => toast.error(err.response?.data?.detail || "Could not update your memory"),
   });
+
+  const hasAnyAnswer =
+    Object.values(kgAnswers).some(v => v.trim()) ||
+    customPairs.some(p => p.question.trim() && p.answer.trim());
 
   const knowledgeGraph = profile?.knowledge_graph;
   const hasGraph = knowledgeGraph && (knowledgeGraph.identity || (knowledgeGraph.values || []).length > 0);
@@ -75,7 +111,10 @@ export default function SettingsPage() {
   const [editingMemory, setEditingMemory] = useState(false);
   const [memoryDraft, setMemoryDraft] = useState<Record<string, string>>({});
 
-  const LIST_FIELDS = ["values", "strengths", "motivations", "work_style", "goals"] as const;
+  const LIST_FIELDS = [
+    "values", "strengths", "motivations", "work_style", "goals",
+    "knowledge_areas", "interests", "priorities",
+  ] as const;
 
   const openMemoryEditor = () => {
     const g: any = knowledgeGraph || {};
@@ -338,6 +377,15 @@ export default function SettingsPage() {
                   {(knowledgeGraph?.goals || []).length > 0 && (
                     <p className="text-sm text-gray-700"><span className="font-medium">Goals: </span>{knowledgeGraph!.goals!.join(", ")}</p>
                   )}
+                  {((knowledgeGraph as any)?.knowledge_areas || []).length > 0 && (
+                    <p className="text-sm text-gray-700"><span className="font-medium">Knows deeply: </span>{(knowledgeGraph as any).knowledge_areas.join(", ")}</p>
+                  )}
+                  {((knowledgeGraph as any)?.interests || []).length > 0 && (
+                    <p className="text-sm text-gray-700"><span className="font-medium">Interests: </span>{(knowledgeGraph as any).interests.join(", ")}</p>
+                  )}
+                  {((knowledgeGraph as any)?.priorities || []).length > 0 && (
+                    <p className="text-sm text-gray-700"><span className="font-medium">Priorities: </span>{(knowledgeGraph as any).priorities.join(", ")}</p>
+                  )}
                   {!editingMemory && (
                     <button onClick={openMemoryEditor} className="btn-secondary text-sm">
                       Edit memory directly
@@ -415,15 +463,57 @@ export default function SettingsPage() {
                     />
                   </div>
                 ))}
+
+                <div className="border-t border-gray-100 pt-4 space-y-4">
+                  <div>
+                    <h3 className="font-medium text-gray-900 text-sm">Teach it anything else</h3>
+                    <p className="text-sm text-gray-500">
+                      Write your own question and answer it. Anything you want your memory to hold:
+                      languages you speak, tools you swear by, things you will never compromise on.
+                    </p>
+                  </div>
+                  {customPairs.map((pair, i) => (
+                    <div key={i} className="space-y-2 rounded-lg border border-gray-200 p-3">
+                      <div className="flex gap-2">
+                        <input
+                          value={pair.question}
+                          onChange={(e) => setCustomPairs(ps => ps.map((p, j) => j === i ? { ...p, question: e.target.value } : p))}
+                          placeholder="Your own question, for example: What languages do I speak?"
+                          className="input flex-1"
+                        />
+                        <button
+                          onClick={() => setCustomPairs(ps => ps.filter((_, j) => j !== i))}
+                          className="btn-secondary px-3 text-red-600 border-red-200 hover:bg-red-50"
+                          aria-label="Remove this question"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <Textarea
+                        value={pair.answer}
+                        onChange={(e) => setCustomPairs(ps => ps.map((p, j) => j === i ? { ...p, answer: e.target.value } : p))}
+                        placeholder="Your answer, in your own words"
+                        rows={2}
+                      />
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => setCustomPairs(ps => [...ps, { question: "", answer: "" }])}
+                    className="btn-secondary text-sm"
+                  >
+                    <Plus className="w-4 h-4" /> Add your own question
+                  </button>
+                </div>
+
                 <button
                   onClick={() => buildGraphMut.mutate()}
-                  disabled={buildGraphMut.isPending || Object.values(kgAnswers).every((v) => !v.trim())}
+                  disabled={buildGraphMut.isPending || !hasAnyAnswer}
                   className="btn-primary w-full justify-center py-2.5"
                 >
                   {buildGraphMut.isPending ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> Building your knowledge graph...</>
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Growing your memory...</>
                   ) : (
-                    <><BrainCircuit className="w-4 h-4" /> Build knowledge graph</>
+                    <><BrainCircuit className="w-4 h-4" /> Add this to your memory</>
                   )}
                 </button>
               </Card>

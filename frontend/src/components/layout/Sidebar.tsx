@@ -1,24 +1,83 @@
 "use client";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import {
   LayoutDashboard, FileText, Briefcase, Zap,
   SendHorizonal, Settings, LogOut, ChevronRight,
+  Link2, Send, BrainCircuit,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 
-const NAV = [
-  { href: "/dashboard",    label: "Dashboard",     icon: LayoutDashboard },
-  { href: "/resume",       label: "My Resume",     icon: FileText },
-  { href: "/jobs",         label: "Job Postings",  icon: Briefcase },
-  { href: "/apply",        label: "Apply / Generate", icon: Zap },
-  { href: "/applications", label: "Applications",  icon: SendHorizonal },
-  { href: "/settings",     label: "Settings",      icon: Settings },
+// The two things this product is actually for sit at the top: filling a
+// real form and mailing an application. Everything below them exists to
+// make those two work better (the resume and the memory feed the AI),
+// and the tracking pages sit last because they are records, not actions.
+const NAV: {
+  href: string; label: string; icon: any;
+  tab?: string; section?: string;
+}[] = [
+  { href: "/dashboard", label: "Home", icon: LayoutDashboard },
+
+  { section: "Apply", href: "/apply?tab=googleform", tab: "googleform", label: "Fill a Form", icon: Link2 },
+  { href: "/apply?tab=email", tab: "email", label: "Mail an Application", icon: Send },
+
+  { section: "Your Profile", href: "/resume", label: "My Resume", icon: FileText },
+  { href: "/settings?tab=knowledge", tab: "knowledge", label: "My Memory", icon: BrainCircuit },
+  { href: "/settings", label: "Settings", icon: Settings },
+
+  { section: "More Tools", href: "/apply?tab=generate", tab: "generate", label: "Full Application Kit", icon: Zap },
+  { href: "/jobs", label: "Job Postings", icon: Briefcase },
+  { href: "/applications", label: "Applications", icon: SendHorizonal },
 ];
 
-export function Sidebar() {
+function NavLinks() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const currentTab = searchParams.get("tab");
+
+  return (
+    <>
+      {NAV.map(({ href, label, icon: Icon, tab, section }) => {
+        const basePath = href.split("?")[0];
+        // Entries that share a path are told apart by their tab query
+        // parameter; an entry without one only lights up when no sibling
+        // with a tab owns the current URL.
+        const samePathTabs = NAV.filter(n => n.href.split("?")[0] === basePath && n.tab);
+        const active = pathname === basePath || pathname.startsWith(basePath + "/")
+          ? tab
+            ? currentTab === tab
+            : !samePathTabs.some(n => n.tab === currentTab)
+          : false;
+        return (
+          <div key={href}>
+            {section && (
+              <p className="px-3 pt-4 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+                {section}
+              </p>
+            )}
+            <Link
+              href={href}
+              className={cn(
+                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors group",
+                active
+                  ? "bg-indigo-50 text-indigo-700"
+                  : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+              )}
+            >
+              <Icon className={cn("w-4 h-4 shrink-0", active ? "text-indigo-600" : "text-gray-400 group-hover:text-gray-600")} />
+              <span className="flex-1">{label}</span>
+              {active && <ChevronRight className="w-3.5 h-3.5 text-indigo-400" />}
+            </Link>
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+export function Sidebar() {
   const { user, logout } = useAuth();
 
   return (
@@ -34,26 +93,10 @@ export function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        {NAV.map(({ href, label, icon: Icon }) => {
-          const active = pathname === href || pathname.startsWith(href + "/");
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors group",
-                active
-                  ? "bg-indigo-50 text-indigo-700"
-                  : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-              )}
-            >
-              <Icon className={cn("w-4 h-4 shrink-0", active ? "text-indigo-600" : "text-gray-400 group-hover:text-gray-600")} />
-              <span className="flex-1">{label}</span>
-              {active && <ChevronRight className="w-3.5 h-3.5 text-indigo-400" />}
-            </Link>
-          );
-        })}
+      <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
+        <Suspense fallback={null}>
+          <NavLinks />
+        </Suspense>
       </nav>
 
       {/* User */}
