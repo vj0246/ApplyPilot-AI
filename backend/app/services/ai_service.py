@@ -150,7 +150,9 @@ Parsing rules, follow all of them:
    CGPA in any format it appears (for example "8.9/10", "3.7", "92%", "CGPA: 8.5") into the gpa
    field exactly as written
 4. Capture every profile link, even without "https": text like "github.com/name" or
-   "linkedin.com/in/name" is a real link, normalize it to a full https URL
+   "linkedin.com/in/name" is a real link. Keep the entire path and every character of the link
+   id exactly as written, never shorten, complete, or guess any part of it; only prepend
+   "https://" when the scheme is missing
 5. Keep numbers and metrics inside bullets exactly as written, never round or reword them
 6. Do not drop skills because they look minor, list every tool, framework, library, and language
    mentioned anywhere in the text
@@ -508,34 +510,49 @@ async def generate_email(
     exp = rp.get("experience") or []
     current_role = f"{exp[0].get('title','')} at {exp[0].get('company','')}" if exp else ""
     edu = (rp.get("education") or [{}])[0]
-    edu_line = " ".join(str(v) for v in [edu.get("degree"), edu.get("field"), edu.get("school")] if v)
+    edu_parts = [p for p in [edu.get("degree"), edu.get("field")] if p]
+    edu_line = " in ".join(str(p) for p in edu_parts)
+    if edu.get("school"):
+        edu_line = (edu_line + f" student at {edu['school']}") if edu_line else str(edu["school"])
 
     system = f"""You are a senior professional job email writer with deep experience getting candidates
 interviews at competitive companies. Every email you write is read closely against the exact job
 description it responds to, so it must be tightly and visibly aligned with what that role actually
 asks for, not a generic application anyone could send.
 
-The email body must follow this exact structure, in this order, as separate short paragraphs:
-1. A short professional greeting on its own line
-2. One paragraph where the candidate introduces themselves: name, current role or education, and
-   the two or three real skills that matter most for this exact job
-3. One paragraph introducing the candidate's real projects from the list below, each in one tight
-   sentence that connects the project to what this job actually asks for. Only use projects that
-   are listed, never invent one
-4. A short final note: one confident closing line with a clear, specific next step, and a mention
-   that the resume is attached to this email as a document
-5. A signature block, each item on its own line: the candidate's full name, then the GitHub link,
-   then the LinkedIn link. Include a link line only if that link is listed below
+The email body must follow this exact layout, in this order, each part its own paragraph separated
+by a blank line. This is the layout of a normal, warm, professional application email:
+1. "Dear Hiring Team," on its own line (or "Dear [Name]," if a recipient name is given)
+2. "I hope you are doing well." on its own line
+3. An interest paragraph: state interest in the exact role at the exact company, then one sentence
+   positioning who the candidate is (their study or current role and focus) and why this specific
+   company's work excites them
+4. A projects paragraph, the heart of the email: walk through two or three real projects from the
+   list below in flowing sentences, each with what was concretely built, the methods or tools used,
+   and what it demonstrated. Only projects that are listed, never an invented one
+5. An honest alignment paragraph: name what in their background maps directly to what this job asks
+   for, acknowledge gracefully anything the role centers on that their work has only been adjacent
+   to, and state the concrete skills they are confident in and what they are eager to deepen
+6. A contribution paragraph: one or two sentences of genuine enthusiasm about what they would help
+   build at this company, tied to what the company actually does
+7. A closing paragraph: thank them for their time and consideration, and say they would be grateful
+   for the opportunity to discuss how their background aligns with the requirements
+8. A signature block, each item on its own line, exactly like this:
+   "Kind regards,"
+   the candidate's full name
+   "Resume Attached"
+   "LinkedIn: " followed by the LinkedIn link
+   "GitHub: " followed by the GitHub link
+   Include a link line only if that link is given below, and copy each link character for
+   character exactly as given, never shortened, reworded, or reconstructed
 
 Non negotiable rules:
-1. Read the required skills and responsibilities given below and mirror the two or three that matter
-   most, using the candidate's real matched skills and fit, never a skill they do not have
+1. Read the required skills and responsibilities given below and mirror the ones that matter most,
+   using the candidate's real matched skills and fit, never a skill they do not have
 2. Subject line format: "Application for [Role Title], [Full Name]"
-3. No filler anywhere, every sentence must connect a real fact about the candidate to something
-   specific this job actually asks for
-4. Do not say "I hope this email finds you well" or any other empty opener
-5. Sound like a real, thoughtful, confident professional wrote this personally for this one role,
-   never like a template that got the company name swapped in
+3. Every sentence must connect a real fact about the candidate to something specific this job asks
+   for, no generic sentences that could be sent to any company
+4. Sound like a real, thoughtful, confident professional wrote this personally for this one role
 {WRITING_STANDARDS}{_custom_instructions_block(custom_instructions)}
 Return JSON: {{"subject": "...", "body": "..."}}"""
 
@@ -561,37 +578,36 @@ Extra context from the candidate: {extra_context}"""
     if result and result.get("subject"):
         return result
 
-    # Fallback mirrors the same structure the prompt demands: greeting,
-    # self introduction, projects, final note, then name and links.
-    intro = f"I am {name}"
-    if current_role:
-        intro += f", currently {current_role}"
-    elif edu_line:
-        intro += f", {edu_line}"
-    intro += f". My background in {top_skill_str} lines up directly with what this role asks for."
+    # Fallback mirrors the exact same layout the prompt demands, so a
+    # Groq outage degrades the writing, never the structure.
+    who = current_role or edu_line or f"a professional with a background in {top_skill_str}"
 
-    projects_sentence = ""
+    projects_para = ""
     if project_lines:
-        first = project_lines[0].split(":")[0].strip()
-        projects_sentence = (
-            f"Among my projects, {first} shows this best, and my resume covers the rest in detail.\n\n"
-        )
+        pieces = []
+        for p in project_lines[:3]:
+            pname, _, pdesc = p.partition(":")
+            pieces.append(f"I built {pname.strip()}" + (f", {pdesc.strip()}" if pdesc.strip() else ""))
+        projects_para = ". ".join(pieces) + ".\n\n"
 
-    signature = name
-    if github_url:
-        signature += f"\n{github_url}"
+    signature_lines = ["Kind regards,", "", name, "", "Resume Attached"]
     if linkedin_url:
-        signature += f"\n{linkedin_url}"
+        signature_lines.append(f"LinkedIn: {linkedin_url}")
+    if github_url:
+        signature_lines.append(f"GitHub: {github_url}")
 
     return {
         "subject": f"Application for {job_title}, {name}",
         "body": (
-            f"Hello,\n\n"
-            f"{intro}\n\n"
-            f"{projects_sentence}"
-            f"My resume is attached to this email as a document. I would welcome a short call to "
-            f"discuss how I can contribute to {company} from day one.\n\n"
-            f"{signature}"
+            f"Dear Hiring Team,\n\n"
+            f"I hope you are doing well.\n\n"
+            f"I am writing to express my interest in the {job_title} role at {company}. "
+            f"I am {who}, and my background in {top_skill_str} lines up directly with what "
+            f"this role asks for.\n\n"
+            f"{projects_para}"
+            f"Thank you for your time and consideration. I would be grateful for the opportunity "
+            f"to discuss how my background aligns with your requirements.\n\n"
+            + "\n".join(signature_lines)
         )
     }
 
@@ -719,7 +735,31 @@ async def answer_form_questions(
     exp      = resume_parsed.get("experience", [])
     recent   = f"{exp[0].get('title','')} at {exp[0].get('company','')}" if exp else "recent role"
     bullets  = "; ".join((exp[0].get("bullets") or [])[:3]) if exp else ""
-    skills   = ", ".join((resume_parsed.get("skills") or [])[:10])
+    skills   = ", ".join((resume_parsed.get("skills") or [])[:15])
+
+    # The full project list and every past role, not just the most recent
+    # one — the open ended questions ("describe your most impactful
+    # project") are exactly the ones that read as generic when the model
+    # only has a skill list to work from, and the projects are where the
+    # real, specific material lives.
+    project_lines = []
+    for pr in (resume_parsed.get("projects") or [])[:6]:
+        line = pr.get("name") or ""
+        if pr.get("description"):
+            line += f": {pr['description']}"
+        if pr.get("tech"):
+            line += f" (built with {', '.join(pr['tech'][:6])})"
+        if line.strip():
+            project_lines.append(line)
+    projects_block = "\n".join(f"  - {p}" for p in project_lines)
+
+    experience_lines = []
+    for e in exp[:4]:
+        line = f"{e.get('title','')} at {e.get('company','')}"
+        if e.get("bullets"):
+            line += ": " + "; ".join(e["bullets"][:3])
+        experience_lines.append(line)
+    experience_block = "\n".join(f"  - {e}" for e in experience_lines)
     jt       = (job_parsed or {}).get("title", "this role")
     company  = (job_parsed or {}).get("company", "this company")
     culture  = ", ".join(((job_parsed or {}).get("culture") or [])[:3])
@@ -794,6 +834,10 @@ Grounding facts about {name}:
 - Certifications: {certifications or "none on file"}
 - Recent role: {recent}
 - Key achievements: {bullets}
+- All experience:
+{experience_block or "  (none on file)"}
+- Projects, the richest material for any open ended question:
+{projects_block or "  (none on file)"}
 - Technical skills: {skills}
 - Extra context: {extra_context}
 {graph_context}
@@ -810,7 +854,9 @@ Rules for every answer:
    experience, a strength, or a motivation, never refuse and never say information is unavailable.
    Write the strongest honest answer the background above actually supports, drawing on whatever
    real experience, skills, or achievements are listed, even if the question asked for something
-   slightly more specific than what is on file
+   slightly more specific than what is on file. For any open ended answer, name one real project
+   or role from the background above and say concretely what was built or done and with what,
+   never a general claim like "I have worked on several projects" that anyone could write
 4. Match the answer length to the box it goes into. A question marked "single line box" gets one
    short line, never a paragraph. A question marked "long answer box" gets 3 to 5 full, specific
    sentences. Exact facts like emails, links, or numbers are always answered with just that value
