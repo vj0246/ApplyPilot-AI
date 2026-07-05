@@ -165,15 +165,11 @@ def _looks_like_grid(options: List[str]) -> bool:
 
 
 async def _read_entry_id(item) -> Optional[str]:
-    # Short answer and paragraph fields render a real <input>/<textarea>
-    # whose name attribute is literally "entry.<id>" — the same identifier
-    # Google's own formResponse endpoint reads on submit, and the same one
-    # the "Get pre-filled link" feature encodes into a shareable URL. Choice
-    # type fields (radio, checkbox, dropdown) don't have a native named
-    # input since Google renders custom widgets for those, so the id is
-    # read instead from the data-params attribute Google attaches to the
-    # question container, which is a JSON-like array with the entry id as
-    # its first long numeric token.
+    # When a field renders a real <input>/<textarea> whose name attribute
+    # is literally "entry.<id>", that id is authoritative — it's the same
+    # identifier Google's own formResponse endpoint reads on submit, and
+    # the same one the "Get pre-filled link" feature encodes into a
+    # shareable URL.
     # A real Google entry id is always a plain number. Some named inputs
     # carry a suffix used for internal plumbing (seen in the wild:
     # "entry.1677974547_sentinel" on a grid question) — appending that
@@ -189,6 +185,16 @@ async def _read_entry_id(item) -> Optional[str]:
             if candidate.isdigit():
                 return candidate
 
+    # Most questions have no named input at all (Google renders custom
+    # widgets), so the id comes from the data-params attribute on the
+    # question container. Its structure is
+    #   [<question id>, "Question text", ..., [[<entry id>, ...]]]
+    # and the two ids are different numbers. Prefill only accepts the
+    # NESTED one after the double bracket — verified live: with the
+    # nested id the form loads with the value typed in, with the first
+    # number Google ignores the parameter and shows a blank form. The
+    # old code here grabbed the first number, which is why every
+    # "pre-filled" link opened empty.
     # data-params can sit on the listitem itself or on a nested element
     # depending on which question type rendered it, so check both rather
     # than assuming one exact spot in the tree.
@@ -198,7 +204,7 @@ async def _read_entry_id(item) -> Optional[str]:
         if holder:
             params = await holder.get_attribute("data-params")
     if params:
-        m = re.search(r"\[(\d{5,})", params)
+        m = re.search(r"\[\[(\d{3,})", params)
         if m:
             return m.group(1)
 
