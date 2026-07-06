@@ -28,24 +28,47 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 
-class _IPv4SMTP(smtplib.SMTP):
-    """Plain smtplib.SMTP resolves the mail server's hostname with no
-    address family preference, and on Render (and several other cloud
-    hosts) the container only has an outbound route for IPv4. If Gmail's
-    AAAA record comes back first, the connection attempt fails with
-    "Network is unreachable" before IPv4 is ever tried. Forcing AF_INET at
-    the socket level sidesteps that entirely; the hostname stored on the
-    instance for the STARTTLS certificate check is untouched, so
-    certificate validation still checks against the real mail server name,
-    not the raw IP."""
-    def _get_socket(self, host, port, timeout):
-        addr_info = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
-        family, socktype, proto, _canonname, sockaddr = addr_info[0]
+def _connect_any(host: str, port: int, timeout) -> socket.socket:
+    """Plain smtplib connects to whichever address the resolver returns
+    first and gives up if that one address is unreachable. Cloud hosts
+    make that a coin flip: a container may have only an IPv4 route, only
+    an IPv6 route, or both, and Gmail publishes both record types. So:
+    resolve everything, try IPv4 addresses first (the more commonly
+    routable family on these hosts), then IPv6, and only fail after every
+    address of both families refused or timed out."""
+    addr_info = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
+    addr_info.sort(key=lambda ai: 0 if ai[0] == socket.AF_INET else 1)
+    last_err: Exception | None = None
+    for family, socktype, proto, _canonname, sockaddr in addr_info:
         sock = socket.socket(family, socktype, proto)
-        if timeout is not None:
-            sock.settimeout(timeout)
-        sock.connect(sockaddr)
-        return sock
+        try:
+            if timeout is not None:
+                sock.settimeout(timeout)
+            sock.connect(sockaddr)
+            return sock
+        except OSError as e:
+            last_err = e
+            sock.close()
+            log.warning(f"SMTP connect to {sockaddr} failed ({e}), trying next address")
+            continue
+    raise last_err if last_err else OSError(f"No addresses resolved for {host}:{port}")
+
+
+class _AnyStackSMTP(smtplib.SMTP):
+    """The hostname stored on the instance for the STARTTLS certificate
+    check is untouched, so certificate validation still checks against
+    the real mail server name, not a raw address."""
+    def _get_socket(self, host, port, timeout):
+        return _connect_any(host, port, timeout)
+
+
+class _AnyStackSMTP_SSL(smtplib.SMTP_SSL):
+    """The 465 path used to use plain SMTP_SSL with no address handling
+    at all — the exact gap that kept "Network is unreachable" alive after
+    the 587 path was fixed."""
+    def _get_socket(self, host, port, timeout):
+        sock = _connect_any(host, port, timeout)
+        return self.context.wrap_socket(sock, server_hostname=self._host)
 
 
 _URL_RE = re.compile(r"https?://[^\s<>\"]+")
@@ -108,7 +131,7 @@ def _build_message(
 
 
 def _send_starttls(smtp_host, port, smtp_username, smtp_password, sender_email, recipient_email, msg, timeout):
-    with _IPv4SMTP(smtp_host, port, timeout=timeout) as server:
+    with _AnyStackSMTP(smtp_host, port, timeout=timeout) as server:
         server.starttls()
         server.login(smtp_username, smtp_password)
         server.sendmail(sender_email, [recipient_email], msg.as_string())
@@ -116,7 +139,7 @@ def _send_starttls(smtp_host, port, smtp_username, smtp_password, sender_email, 
 
 def _send_ssl(smtp_host, port, smtp_username, smtp_password, sender_email, recipient_email, msg, timeout):
     context = ssl.create_default_context()
-    with smtplib.SMTP_SSL(smtp_host, port, timeout=timeout, context=context) as server:
+    with _AnyStackSMTP_SSL(smtp_host, port, timeout=timeout, context=context) as server:
         server.login(smtp_username, smtp_password)
         server.sendmail(sender_email, [recipient_email], msg.as_string())
 
