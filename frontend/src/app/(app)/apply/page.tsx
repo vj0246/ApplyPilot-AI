@@ -648,8 +648,9 @@ function ApplyPageInner() {
                 <p className="text-blue-700">
                   This writes an application email about the job description from your resume
                   and your knowledge graph. Nothing goes out until you review the draft below,
-                  edit it if you want, and press send. It sends from your own address, connected
-                  in settings under Email Account.
+                  edit it if you want, and press send. Sending works out of the box, no setup
+                  needed. Connect Gmail in settings if you want it to leave from your own literal
+                  address instead.
                 </p>
               </div>
             </div>

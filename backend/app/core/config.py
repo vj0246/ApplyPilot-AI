@@ -29,15 +29,27 @@ class Settings(BaseSettings):
     def GROQ_API_KEYS(self) -> list[str]:
         return [k.strip() for k in self.GROQ_API_KEY.split(",") if k.strip()]
 
-    # Gmail API OAuth — the production mail path. Render blocks outbound
-    # SMTP ports network wide, so on Render mail can only leave over
-    # HTTPS; the Gmail API sends from the user's own account after they
-    # connect it once. Empty values simply hide the Connect Gmail option.
+    # Gmail API OAuth — an optional, literal "sent from my own Gmail"
+    # path. Requires the person to connect their Google account, and
+    # while the Google OAuth app itself is unverified, only works for a
+    # small list of test users. Empty values simply hide the Connect
+    # Gmail option; SendGrid below is what makes sending work for
+    # everyone with zero setup regardless of whether this is configured.
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
     # Public base URL of this backend, used to build the OAuth redirect
     # URI (must match the one registered in the Google Cloud console).
     BACKEND_URL: str = "http://localhost:8000"
+
+    # SendGrid — the default mail path, works for every user with no
+    # setup on their part. Render blocks outbound SMTP network wide, so
+    # this goes out over HTTPS like the Gmail path, but needs no OAuth
+    # and no per user connection: one verified sender email (verified
+    # once, by clicking a link SendGrid emails you, no domain or DNS
+    # needed) sends on behalf of everyone, with Reply To set to each
+    # applicant's own address so replies still reach the right person.
+    SENDGRID_API_KEY: str = ""
+    SENDGRID_FROM_EMAIL: str = ""
 
     # Files
     UPLOAD_DIR: str = "./uploads"

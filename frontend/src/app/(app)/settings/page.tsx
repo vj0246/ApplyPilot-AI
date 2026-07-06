@@ -563,14 +563,15 @@ function SettingsPageInner() {
                 <div className="flex gap-3">
                   <Mail className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
                   <div className="text-sm text-blue-900">
-                    <p className="font-medium mb-0.5">Sends from your own address</p>
+                    <p className="font-medium mb-0.5">Sending already works, nothing to set up</p>
                     <p className="text-blue-700">
-                      This connects your own mailbox so the application email goes out as you, not
-                      as this tool. Use an app password, never your real account password. On
-                      Gmail, turn on two factor authentication and create an app password under
-                      your Google account security settings. On Outlook, use smtp.office365.com.
-                      Nothing is sent automatically, every email is drafted first and only goes out
-                      when you press send.
+                      {gmailOauthStatus?.default_sending_available
+                        ? "Every application email you send already goes out with no setup on your part. The recruiter's reply lands in your own inbox either way, since Reply To is always set to your real email."
+                        : "Connect an account below so sending works."}
+                      {" "}Connecting Gmail below is optional, and only changes one thing: the email
+                      leaves from your literal Gmail address instead of ApplyPilot's shared sender.
+                      Nothing is ever sent automatically, every email is drafted first and only goes
+                      out when you press send.
                     </p>
                   </div>
                 </div>
@@ -644,18 +645,17 @@ function SettingsPageInner() {
 
               <Card className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <h2 className="font-semibold text-gray-900">Sending account (app password)</h2>
+                  <h2 className="font-semibold text-gray-900">Advanced: send with an app password instead</h2>
                   {profile?.email_account_configured && (
                     <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full flex items-center gap-1">
                       <CheckCircle2 className="w-3.5 h-3.5" /> Connected as {profile.sender_email}
                     </span>
                   )}
                 </div>
-                {gmailOauthStatus?.available && (
-                  <p className="text-xs text-gray-400">
-                    Only used when Gmail above is not connected.
-                  </p>
-                )}
+                <p className="text-xs text-gray-400">
+                  Not needed for normal use, sending already works without this. Only used when
+                  Gmail above is not connected, in place of the automatic default sender.
+                </p>
 
                 <div>
                   <label className="label">Your email address</label>

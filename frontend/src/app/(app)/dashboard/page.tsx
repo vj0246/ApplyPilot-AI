@@ -26,10 +26,19 @@ export default function DashboardPage() {
     queryKey: ["profile"],
     queryFn: () => profileApi.get().then(r => r.data),
   });
+  const { data: gmailOauthStatus } = useQuery({
+    queryKey: ["gmail-oauth-status"],
+    queryFn: () => emailApi.oauthStatus().then(r => r.data),
+  });
 
   const items = apps?.items || [];
   const hasResume = (resumes?.items || []).some((r: any) => r.status === "ready");
-  const hasEmailAccount = !!profile?.email_account_configured || !!profile?.gmail_connected;
+  // Sending works out of the box once SendGrid is configured on the
+  // server — nobody has to connect anything for mail to work, so this
+  // only shows up as a setup step when there is truly no way to send.
+  const hasEmailAccount = !!profile?.email_account_configured
+    || !!profile?.gmail_connected
+    || !!gmailOauthStatus?.default_sending_available;
   const kg = profile?.knowledge_graph;
   const hasMemory = !!(kg && (kg.identity || (kg.values || []).length > 0));
   const setupDone = hasResume && hasEmailAccount && hasMemory;
@@ -134,7 +143,12 @@ export default function DashboardPage() {
         <SmallAction href="/settings?tab=knowledge" icon={BrainCircuit} label="My Memory"
           hint={hasMemory ? "Built, keep growing it" : "Not built yet"} ok={hasMemory} />
         <SmallAction href="/settings?tab=email" icon={Mail} label="Email Account"
-          hint={hasEmailAccount ? `Sends as ${profile?.sender_email}` : "Not connected"} ok={hasEmailAccount} />
+          hint={
+            profile?.gmail_connected ? `Sends as ${profile.gmail_address}` :
+            profile?.email_account_configured ? `Sends as ${profile.sender_email}` :
+            gmailOauthStatus?.default_sending_available ? "Sending works, Gmail optional" :
+            "Not connected"
+          } ok={hasEmailAccount} />
         <SmallAction href="/apply?tab=generate" icon={Sparkles} label="Full Kit"
           hint="Cover letter, email, resume" ok />
       </div>

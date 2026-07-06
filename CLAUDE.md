@@ -113,37 +113,60 @@ render.yaml                  Render blueprint (backend only)
 
 ## Email sending
 
-- From the user's own mailbox: SMTP app password, Fernet encrypted at rest
-  (`smtp_password_encrypted`), decrypted only in memory at send time.
-- Message shape: multipart/mixed [ multipart/alternative [ plain, HTML
-  derived from the plain text at send time ], resume attachment ]. Plain
-  text is what the user approved; HTML is derived so they never drift.
-- Connect logic (`_connect_any`): resolve all addresses, IPv4 first, then
-  IPv6; try configured port, then 587 STARTTLS, then 465 implicit TLS.
-  SMTPAuthenticationError short circuits (a different port never fixes bad
-  credentials).
 - **Render blocks outbound SMTP (25/587/465) network wide on all plans.**
   Raw SMTP delivery cannot work from Render, period, no matter how the
-  sockets are built. That is why `gmail_service.py` exists: it sends the
-  exact same MIME message (built once in `email_service.build_message`,
-  shared by both paths) through the Gmail API over HTTPS instead, which is
-  never blocked. `POST /email/{id}/send` prefers Gmail whenever
-  `Profile.gmail_refresh_token_encrypted` is set, and falls back to SMTP
-  otherwise — SMTP still works fine locally and in docker compose, and stays
-  as the path for any provider besides Gmail.
+  sockets are built (confirmed against production, not theoretical). Every
+  sending path on Render has to leave over HTTPS instead.
+- Three sending paths, tried in this order in `POST /email/{id}/send`:
+  1. **Gmail OAuth** (`gmail_service.py`), if `Profile.gmail_refresh_token_encrypted`
+     is set — sends from the user's own literal Gmail address. Requires the
+     user to click Connect Gmail. While Google's OAuth app is in Testing
+     mode, only test users added in Google Cloud Console (Audience, Test
+     users) can complete that connection, and Google expires every
+     connection after 7 days regardless of use.
+  2. **SendGrid** (`sendgrid_service.py`), if `SENDGRID_API_KEY` and
+     `SENDGRID_FROM_EMAIL` are set — the default, zero setup path that
+     works for every user immediately. Sends from one shared verified
+     sender with the applicant's name in the display name and their real
+     email as Reply To, so a recruiter's reply still reaches the actual
+     person. `SENDGRID_FROM_EMAIL` only needs Single Sender Verification
+     (click a link SendGrid emails you) — no domain or DNS required, which
+     is the whole reason this path exists: it must never require anything
+     from the app's end users, and as little as possible from whoever runs
+     the backend.
+  3. **SMTP app password** (`email_service.py`) — kept for local
+     development and docker compose, where outbound SMTP isn't blocked.
+     Never works on Render itself.
+  All three share one MIME message builder, `email_service.build_message()`
+  (multipart/mixed [ multipart/alternative [ plain, HTML derived from the
+  plain text at send time ], resume attachment ]), so the message a
+  recipient gets is identical no matter which path sent it.
 - Gmail OAuth flow: `GET /email/oauth/start` (authenticated) returns
-  Google's consent URL, with the caller's own JWT as the `state` parameter —
-  the callback is a plain browser redirect from Google with no Authorization
-  header, so the JWT round tripped through `state` is what tells
-  `GET /email/oauth/callback` (public) whose profile to attach the refresh
-  token to. Requires `access_type=offline` and `prompt=consent` on every
-  request or Google omits the refresh token on a repeat consent — if a user
-  reports "noconsent", the fix is revoking access at
-  myaccount.google.com/permissions once, not a code change. Needs
-  `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `BACKEND_URL` set (see
-  `render.yaml` comment for the exact Google Cloud console setup); with them
-  unset the whole feature hides itself (`GET /email/oauth/status`) rather
-  than breaking the SMTP path.
+  Google's consent URL, with the caller's own JWT plus a `return_to` hint
+  as the `state` parameter (`token::settings` or `token::onboarding`) — the
+  callback is a plain browser redirect from Google with no Authorization
+  header, so `state` is what tells `GET /email/oauth/callback` (public)
+  whose profile to attach the refresh token to, and which page to land back
+  on. Requires `access_type=offline` and `prompt=consent` on every request
+  or Google omits the refresh token on a repeat consent — if a user reports
+  "noconsent", the fix is revoking access at myaccount.google.com/permissions
+  once, not a code change. A dead connection (7 day Testing mode expiry, or
+  the user revoked it) surfaces as `gmail_service.GmailReauthRequired`,
+  caught specifically in the send route to clear `Profile.gmail_*` fields —
+  never let that fall through to the generic exception handler, or Settings
+  keeps showing a Connected badge that lies. `Profile.gmail_connected_at`
+  drives the reconnect warning banner (`gmailExpiry()` in
+  `frontend/src/lib/utils.ts`) shown once a connection is within 6.5 days
+  old. Needs `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `BACKEND_URL` set
+  (see `render.yaml` comment for the exact Google Cloud console setup);
+  with them unset the whole feature hides itself (`GET /email/oauth/status`)
+  rather than breaking the other paths.
+- **Google will not verify OAuth app ownership of a `*.vercel.app` (or any
+  shared platform) homepage, ever** — confirmed directly against Google's
+  own stated policy. Getting out of Testing mode without a per person test
+  user list requires a real, personally registered domain. This project
+  deliberately stayed in Testing mode rather than buy one; SendGrid is what
+  makes the product work for everyone regardless.
 
 ## Storage gotchas
 

@@ -255,10 +255,9 @@ function OnboardingPageInner() {
             <div>
               <h2 className="font-semibold text-gray-900 flex items-center gap-2"><Mail className="w-4 h-4" /> Connect your email</h2>
               <p className="text-sm text-gray-500 mt-1">
-                Optional, needed only if you want this tool to send the application email from your own
-                address. Use an app password, never your real account password. On Gmail, turn on two
-                factor authentication and create an app password under your Google account security
-                settings.
+                {gmailOauthStatus?.default_sending_available
+                  ? "Fully optional. Sending already works with no setup at all, replies still reach your own inbox. Connect Gmail only if you want the email to leave from your literal address instead."
+                  : "Optional, needed only if you want this tool to send the application email from your own address."}
               </p>
             </div>
 

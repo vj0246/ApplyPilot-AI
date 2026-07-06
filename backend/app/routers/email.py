@@ -35,7 +35,7 @@ from app.core.database import get_db
 from app.core.auth import decode_token
 from app.models import EmailSend, Job, Profile, Resume, User
 from app.routers.auth import get_current_user
-from app.services import ai_service, email_service, gmail_service
+from app.services import ai_service, email_service, gmail_service, sendgrid_service
 
 router = APIRouter(prefix="/email", tags=["email"])
 log = logging.getLogger(__name__)
@@ -75,7 +75,10 @@ def _out(e: EmailSend) -> dict:
 
 @router.get("/oauth/status")
 async def oauth_status():
-    return {"available": gmail_service.is_configured()}
+    return {
+        "available": gmail_service.is_configured(),
+        "default_sending_available": sendgrid_service.is_configured(),
+    }
 
 
 @router.get("/oauth/start")
@@ -282,7 +285,12 @@ async def send_email_now(
     profile = res.scalar_one_or_none()
     use_gmail = bool(profile and profile.gmail_refresh_token_encrypted)
     use_smtp = bool(profile and profile.smtp_password_encrypted)
-    if not profile or not (use_gmail or use_smtp):
+    use_sendgrid = bool(not use_gmail and sendgrid_service.is_configured())
+    # SendGrid is the always available fallback — nobody has to set
+    # anything up for it, so it only ever loses to Gmail, which someone
+    # has to have deliberately connected because it sends from their own
+    # literal address.
+    if not (use_gmail or use_smtp or use_sendgrid):
         raise HTTPException(
             422,
             "No sending account is configured yet. Connect Gmail, or add your email address and "
@@ -339,6 +347,24 @@ async def send_email_now(
                 attachment_filename=attachment_filename,
             )
             await gmail_service.send_message(refresh_token, msg)
+        elif use_sendgrid:
+            # The default path: works for every user with nothing set up
+            # on their end. Reply To carries the applicant's own address
+            # so a recruiter's reply still reaches them, even though the
+            # message technically leaves from ApplyPilot's one verified
+            # sender rather than the applicant's literal mailbox.
+            rp = (resume.parsed_data or {}) if resume else {}
+            reply_email = rp.get("email") or (profile.sender_email if profile else None) or u.email
+            reply_name = rp.get("name") or u.full_name or "Applicant"
+            msg = email_service.build_message(
+                sender_email=settings.SENDGRID_FROM_EMAIL,
+                recipient_email=e.recipient_email,
+                subject=e.subject,
+                body=e.body,
+                attachment_bytes=attachment_bytes,
+                attachment_filename=attachment_filename,
+            )
+            await sendgrid_service.send_message(msg, reply_email, reply_name)
         else:
             password = crypto.decrypt(profile.smtp_password_encrypted)
             await email_service.send_email(
