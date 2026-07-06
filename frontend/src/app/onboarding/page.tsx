@@ -1,13 +1,13 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState, useCallback } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useDropzone } from "react-dropzone";
 import toast from "react-hot-toast";
 import {
-  Upload, FileText, Loader2, CheckCircle2, BrainCircuit, Mail, Zap, ArrowRight,
+  Upload, FileText, Loader2, CheckCircle2, BrainCircuit, Mail, Zap, ArrowRight, ExternalLink,
 } from "lucide-react";
-import { resumeApi, profileApi } from "@/lib/api";
+import { resumeApi, profileApi, emailApi } from "@/lib/api";
 import { Card, Textarea } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth";
@@ -15,15 +15,54 @@ import { useAuthStore } from "@/store/auth";
 const STEPS = ["Resume", "Knowledge graph", "Email account"] as const;
 
 export default function OnboardingPage() {
+  // useSearchParams needs a Suspense boundary to prerender, so the page
+  // is a thin shell around the real component.
+  return (
+    <Suspense fallback={null}>
+      <OnboardingPageInner />
+    </Suspense>
+  );
+}
+
+function OnboardingPageInner() {
   const router = useRouter();
   const qc = useQueryClient();
   const { user } = useAuthStore();
-  const [step, setStep] = useState(0);
+  const searchParams = useSearchParams();
+  // Coming back from the Gmail consent screen mid wizard lands here with
+  // ?gmailstep=1&gmail=connected — jump straight to the email step
+  // instead of restarting the wizard from the resume upload.
+  const [step, setStep] = useState(searchParams.get("gmailstep") === "1" ? 2 : 0);
 
   useEffect(() => {
     const token = typeof window !== "undefined" ? sessionStorage.getItem("ap_token") : null;
     if (!token) router.push("/auth/login");
   }, [router]);
+
+  const gmailResult = searchParams.get("gmail");
+  useEffect(() => {
+    if (!gmailResult) return;
+    if (gmailResult === "connected") toast.success("Gmail connected");
+    else if (gmailResult === "denied") toast.error("Gmail connection was cancelled");
+    else if (gmailResult === "noconsent") toast.error("Revoke ApplyPilot's access at myaccount.google.com/permissions, then try connecting again");
+    else if (gmailResult === "error") toast.error("Could not connect Gmail, try again");
+    qc.invalidateQueries({ queryKey: ["profile"] });
+    window.history.replaceState(null, "", "/onboarding");
+  }, [gmailResult, qc]);
+
+  const { data: profile } = useQuery({
+    queryKey: ["profile"],
+    queryFn: () => profileApi.get().then(r => r.data),
+  });
+  const { data: gmailOauthStatus } = useQuery({
+    queryKey: ["gmail-oauth-status"],
+    queryFn: () => emailApi.oauthStatus().then(r => r.data),
+  });
+  const connectGmailMut = useMutation({
+    mutationFn: () => emailApi.oauthStart("onboarding"),
+    onSuccess: ({ data }) => { window.location.href = data.url; },
+    onError: (err: any) => toast.error(err.response?.data?.detail || "Could not start the Gmail connection"),
+  });
 
   // ── Step 1: resume ──────────────────────────────────────────────
   const [uploading, setUploading] = useState(false);
@@ -84,13 +123,16 @@ export default function OnboardingPage() {
     sender_email: "", smtp_host: "smtp.gmail.com", smtp_port: 587,
     smtp_username: "", smtp_password: "",
   });
-  const [emailConnected, setEmailConnected] = useState(false);
+  const [smtpConnectedLocal, setSmtpConnectedLocal] = useState(false);
 
   const saveEmailMut = useMutation({
     mutationFn: () => profileApi.setEmailCredentials(emailForm),
-    onSuccess: () => { setEmailConnected(true); toast.success("Email account connected"); },
+    onSuccess: () => { setSmtpConnectedLocal(true); qc.invalidateQueries({ queryKey: ["profile"] }); toast.success("Email account connected"); },
     onError: (err: any) => toast.error(err.response?.data?.detail || "Could not save email account"),
   });
+
+  const gmailConnected = !!profile?.gmail_connected;
+  const emailConnected = gmailConnected || smtpConnectedLocal || !!profile?.email_account_configured;
 
   // ── Finish ────────────────────────────────────────────────────────
   const finishMut = useMutation({
@@ -220,8 +262,31 @@ export default function OnboardingPage() {
               </p>
             </div>
 
-            {!emailConnected ? (
+            {emailConnected ? (
+              <p className="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-lg flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4" />
+                {gmailConnected ? `Connected as ${profile?.gmail_address}` : `Connected as ${emailForm.sender_email}`}
+              </p>
+            ) : (
               <>
+                {gmailOauthStatus?.available && (
+                  <button
+                    onClick={() => connectGmailMut.mutate()}
+                    disabled={connectGmailMut.isPending}
+                    className="btn-primary w-full justify-center py-2.5"
+                  >
+                    {connectGmailMut.isPending
+                      ? <Loader2 className="w-4 h-4 animate-spin" />
+                      : <>Connect Gmail <ExternalLink className="w-3.5 h-3.5" /></>}
+                  </button>
+                )}
+
+                {gmailOauthStatus?.available && (
+                  <div className="flex items-center gap-3 text-xs text-gray-400">
+                    <div className="flex-1 h-px bg-gray-200" /> or use an app password <div className="flex-1 h-px bg-gray-200" />
+                  </div>
+                )}
+
                 <div>
                   <label className="label">Your email address</label>
                   <input
@@ -272,15 +337,11 @@ export default function OnboardingPage() {
                 <button
                   onClick={() => saveEmailMut.mutate()}
                   disabled={saveEmailMut.isPending || !emailForm.sender_email || !emailForm.smtp_password}
-                  className="btn-primary w-full justify-center py-2.5"
+                  className="btn-secondary w-full justify-center py-2.5"
                 >
-                  {saveEmailMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Connect account"}
+                  {saveEmailMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Connect with app password"}
                 </button>
               </>
-            ) : (
-              <p className="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-lg flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4" /> Connected as {emailForm.sender_email}
-              </p>
             )}
 
             <button

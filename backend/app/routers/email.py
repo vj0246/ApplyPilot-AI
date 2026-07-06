@@ -79,7 +79,11 @@ async def oauth_status():
 
 
 @router.get("/oauth/start")
-async def oauth_start(request: Request, u: User = Depends(get_current_user)):
+async def oauth_start(
+    request: Request,
+    return_to: str = Query("settings"),
+    u: User = Depends(get_current_user),
+):
     """Returns the Google consent URL for the frontend to redirect the
     browser to. The state parameter carries the caller's own access
     token rather than a separate server side session, because the
@@ -87,7 +91,9 @@ async def oauth_start(request: Request, u: User = Depends(get_current_user)):
     navigation from Google with no Authorization header at all — the
     token, which Google only ever sees as an opaque string it echoes
     back unchanged, is what lets the callback know whose profile to
-    attach the connection to."""
+    attach the connection to. return_to rides alongside it so someone
+    connecting Gmail from the onboarding wizard lands back inside the
+    wizard instead of getting bounced out to settings mid flow."""
     if not gmail_service.is_configured():
         raise HTTPException(
             503,
@@ -95,7 +101,8 @@ async def oauth_start(request: Request, u: User = Depends(get_current_user)):
             "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.",
         )
     raw_token = request.headers["Authorization"][7:]
-    return {"url": gmail_service.build_auth_url(state=raw_token)}
+    safe_return_to = return_to if return_to in ("settings", "onboarding") else "settings"
+    return {"url": gmail_service.build_auth_url(state=f"{raw_token}::{safe_return_to}")}
 
 
 @router.get("/oauth/callback")
@@ -111,13 +118,19 @@ async def oauth_callback(
     the whole exchange either lands on the settings page with a plain
     success or failure flag for the frontend to show, since there is no
     JSON caller waiting on the other end of a browser redirect."""
-    settings_url = f"{settings.FRONTEND_URL.rstrip('/')}/settings?tab=email"
+    raw_state = state or ""
+    token_part, _, return_to = raw_state.partition("::")
+    base = settings.FRONTEND_URL.rstrip("/")
+    settings_url = (
+        f"{base}/onboarding?gmailstep=1" if return_to == "onboarding"
+        else f"{base}/settings?tab=email"
+    )
     if error:
         return RedirectResponse(f"{settings_url}&gmail=denied")
-    if not code or not state:
+    if not code or not token_part:
         return RedirectResponse(f"{settings_url}&gmail=error")
 
-    payload = decode_token(state)
+    payload = decode_token(token_part)
     if not payload:
         return RedirectResponse(f"{settings_url}&gmail=error")
 
