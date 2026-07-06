@@ -6,6 +6,12 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "ApplyPilot — Apply everywhere intelligently",
   description: "AI-powered job application assistant. Upload your resume once, apply everywhere.",
+  // Proves domain ownership to Google Search Console — required for the
+  // OAuth consent screen homepage verification, since Vercel owns the
+  // vercel.app DNS, not us, so the HTML tag method is the only option.
+  verification: {
+    google: "0zm7y83O_nD1RSKxGMjrQAlIQNPjYtpmmbHSv9zDAaU",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
