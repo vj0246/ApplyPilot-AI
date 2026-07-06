@@ -489,6 +489,8 @@ async def generate_email(
     knowledge_graph: Optional[Dict] = None,
     resume_parsed: Optional[Dict] = None,
     custom_instructions: str = "",
+    linkedin_url: str = "",
+    github_url: str = "",
 ) -> Dict[str, str]:
     job_title    = job_parsed.get("title", "the role")
     company      = job_parsed.get("company", "the company")
@@ -502,8 +504,14 @@ async def generate_email(
     graph_context = _knowledge_graph_context(knowledge_graph)
 
     rp = resume_parsed or {}
-    github_url   = rp.get("github") or ""
-    linkedin_url = rp.get("linkedin") or ""
+    # LinkedIn and GitHub links come only from what the person typed into
+    # their own profile settings, never from anything the resume parser
+    # guessed. A resume link can be stale, a former employer's page, or
+    # simply parsed wrong — the profile field is the one place the person
+    # explicitly said "this is my real link," so it is the only source
+    # trusted for something that goes out under their name in every email.
+    linkedin_url = (linkedin_url or "").strip()
+    github_url = (github_url or "").strip()
     project_lines = []
     for pr in (rp.get("projects") or [])[:4]:
         line = pr.get("name") or ""
@@ -550,8 +558,10 @@ by a blank line. This is the layout of a normal, warm, professional application 
    "Resume Attached"
    "LinkedIn: " followed by the LinkedIn link
    "GitHub: " followed by the GitHub link
-   Include a link line only if that link is given below, and copy each link character for
-   character exactly as given, never shortened, reworded, or reconstructed
+   The LinkedIn and GitHub links given below, and only those, are the candidate's real links.
+   Copy each one character for character exactly as given, never shortened, reworded, or
+   reconstructed, and never invent or infer a link from anywhere else. If a link below says none
+   on file, leave that entire signature line out completely rather than guessing one
 
 Non negotiable rules:
 1. Read the required skills and responsibilities given below and mirror the ones that matter most,

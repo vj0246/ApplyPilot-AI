@@ -138,6 +138,8 @@ async def _generate(aid: str, uid: str, extra_context: str):
             email_data = await ai_service.generate_email(
                 name, jp, fit, extra_context,
                 resume_parsed=rp, custom_instructions=custom_instructions,
+                linkedin_url=(prof.linkedin_url if prof else None) or "",
+                github_url=(prof.github_url if prof else None) or "",
             )
             a.email_subject = email_data.get("subject", "")
             a.email_body    = email_data.get("body", "")

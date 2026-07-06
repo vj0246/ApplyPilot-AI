@@ -212,6 +212,8 @@ async def create_draft(
         knowledge_graph=knowledge_graph,
         resume_parsed=resume.parsed_data or {},
         custom_instructions=custom_instructions,
+        linkedin_url=(profile.linkedin_url if profile else None) or "",
+        github_url=(profile.github_url if profile else None) or "",
     )
 
     e = EmailSend(
