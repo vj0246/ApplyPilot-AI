@@ -202,7 +202,12 @@ Return ONLY a JSON object with this exact structure:
 }"""
 
     result = await _json_chat(f"Parse this resume:\n\n{raw_text[:12000]}", system)
-    return result if result else _fallback_parse_resume(raw_text)
+    # The model must return one object here. Some models (seen with
+    # gpt-oss) occasionally return a JSON array instead — a list crashes
+    # every .get() downstream, so anything that isn't a dict falls back.
+    if isinstance(result, list):
+        result = next((x for x in result if isinstance(x, dict)), None)
+    return result if isinstance(result, dict) and result else _fallback_parse_resume(raw_text)
 
 
 def _fallback_parse_resume(text: str) -> Dict[str, Any]:
@@ -322,7 +327,9 @@ approximately when the posting quotes another currency, and always set salary_cu
         f"URL: {url}\n\nJob Description:\n{description[:5000]}",
         system,
     )
-    return result if result else _fallback_parse_job(description)
+    if isinstance(result, list):
+        result = next((x for x in result if isinstance(x, dict)), None)
+    return result if isinstance(result, dict) and result else _fallback_parse_job(description)
 
 
 def _fallback_parse_job(text: str) -> Dict[str, Any]:
@@ -575,7 +582,9 @@ This company's culture signals: {culture}
 Extra context from the candidate: {extra_context}"""
 
     result = await _json_chat(prompt, system)
-    if result and result.get("subject"):
+    if isinstance(result, list):
+        result = next((x for x in result if isinstance(x, dict)), None)
+    if isinstance(result, dict) and result.get("subject"):
         return result
 
     # Fallback mirrors the exact same layout the prompt demands, so a
@@ -644,7 +653,9 @@ Return ONLY this JSON structure:
 
     qa_formatted = "\n\n".join(f"Question: {p.get('question','')}\nAnswer: {p.get('answer','')}" for p in qa_pairs)
     result = await _json_chat(f"Build the knowledge graph from these answers:\n\n{qa_formatted}", system)
-    return result if result else {
+    if isinstance(result, list):
+        result = next((x for x in result if isinstance(x, dict)), None)
+    return result if isinstance(result, dict) and result else {
         "identity": "", "values": [], "strengths": [], "motivations": [],
         "work_style": [], "achievements": [], "goals": [],
         "knowledge_areas": [], "interests": [], "priorities": [],
@@ -876,8 +887,18 @@ Return a JSON array, one object per question:
         system,
     )
 
-    if isinstance(result, list) and result:
-        return result
+    # This one must be a list. Some models wrap it in an object like
+    # {"answers": [...]} — unwrap that, and drop any non dict items so a
+    # stray string can never crash the .get() calls in the callers.
+    if isinstance(result, dict):
+        for v in result.values():
+            if isinstance(v, list):
+                result = v
+                break
+    if isinstance(result, list):
+        result = [x for x in result if isinstance(x, dict)]
+        if result:
+            return result
 
     answers = []
     for q in questions:
