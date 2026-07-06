@@ -188,19 +188,28 @@ async def send_email_now(
     attachment_filename = None
     if e.resume_id:
         resume = await db.get(Resume, e.resume_id)
-        if resume and resume.file_path:
-            try:
-                with open(resume.file_path, "rb") as fh:
-                    attachment_bytes = fh.read()
+        if resume:
+            # Postgres copy first — it survives redeploys, which wipe the
+            # container disk. The disk path only matters for rows uploaded
+            # before file bytes were stored in the database.
+            if resume.file_data:
+                attachment_bytes = resume.file_data
+            elif resume.file_path:
+                try:
+                    with open(resume.file_path, "rb") as fh:
+                        attachment_bytes = fh.read()
+                except OSError:
+                    pass
+            if attachment_bytes:
                 attachment_filename = resume.filename or "resume.pdf"
-            except OSError:
-                pass
     if not attachment_bytes:
         raise HTTPException(
             422,
-            "The resume file for this draft is not available on the server anymore, and every "
-            "application email must carry the resume attached as a document. Upload your resume "
-            "again, create a new draft, and send that one.",
+            "The resume file for this draft is not stored on the server, and every application "
+            "email must carry the resume attached as a document. This happens for resumes uploaded "
+            "before attachments were added. Upload your resume once more, create a new draft, and "
+            "send that one — from then on the file is kept in the database and survives every "
+            "redeploy.",
         )
 
     try:

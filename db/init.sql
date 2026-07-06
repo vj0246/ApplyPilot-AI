@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS resumes (
     user_id     UUID REFERENCES users(id) ON DELETE CASCADE,
     filename    VARCHAR(500) NOT NULL,
     file_path   VARCHAR(1024) NOT NULL,
+    file_data   BYTEA,
     file_size   INTEGER NOT NULL,
     mime_type   VARCHAR(100) NOT NULL,
     status      VARCHAR(50) DEFAULT 'processing',

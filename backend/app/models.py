@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -85,6 +85,12 @@ class Resume(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     filename: Mapped[str] = mapped_column(String(500))
     file_path: Mapped[str] = mapped_column(String(1024))
+    # The actual file bytes. The disk copy at file_path is a cache at
+    # best — on Render the container filesystem is wiped on every deploy,
+    # and the resume must survive that because every application email
+    # attaches it. Postgres is the only storage this app has that
+    # persists, and a resume is well under the 10 MB upload cap.
+    file_data: Mapped[Optional[bytes]] = mapped_column(LargeBinary)
     file_size: Mapped[int] = mapped_column(Integer)
     mime_type: Mapped[str] = mapped_column(String(100))
     status: Mapped[str] = mapped_column(String(50), default="processing")

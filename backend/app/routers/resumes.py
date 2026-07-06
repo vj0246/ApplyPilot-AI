@@ -59,6 +59,7 @@ async def upload(
 
     r = Resume(
         user_id=u.id, filename=file.filename or "resume", file_path=path,
+        file_data=data,
         file_size=len(data), mime_type=mime, status="processing",
         is_primary=True, label=label,
     )
