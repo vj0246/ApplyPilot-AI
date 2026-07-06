@@ -139,6 +139,10 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="border-t border-gray-100 py-8 text-center text-gray-400 text-sm">
         <p>© {new Date().getFullYear()} ApplyPilot · Open source · MIT License</p>
+        <p className="mt-2 flex items-center justify-center gap-4">
+          <Link href="/privacy" className="hover:text-gray-600">Privacy Policy</Link>
+          <Link href="/terms" className="hover:text-gray-600">Terms of Service</Link>
+        </p>
       </footer>
     </div>
   );
