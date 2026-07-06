@@ -41,6 +41,7 @@ export interface Profile {
   sender_email?: string;
   gmail_connected?: boolean;
   gmail_address?: string;
+  gmail_connected_at?: string;
   updated_at?: string;
 }
 

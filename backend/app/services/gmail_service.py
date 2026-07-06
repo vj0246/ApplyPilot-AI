@@ -29,6 +29,16 @@ from app.core.config import settings
 
 log = logging.getLogger(__name__)
 
+class GmailReauthRequired(RuntimeError):
+    """Raised specifically when Google rejects the stored refresh token
+    itself (expired, revoked, or the account disconnected access) rather
+    than some other send failure. The router catches this exact type to
+    clear the stale connection, so the profile stops claiming Gmail is
+    connected when Google no longer honors it — a bare RuntimeError here
+    would leave the UI showing 'connected' forever after the 7 day
+    Testing mode expiry actually hits."""
+
+
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 SEND_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
@@ -101,9 +111,17 @@ async def _access_token(refresh_token: str) -> str:
         })
     if resp.status_code != 200:
         log.error(f"Gmail token refresh failed: {resp.status_code} {resp.text[:300]}")
+        try:
+            error_code = resp.json().get("error")
+        except Exception:
+            error_code = None
+        if error_code == "invalid_grant":
+            raise GmailReauthRequired(
+                "This Gmail connection has expired or was revoked. Connect Gmail again in settings."
+            )
         raise RuntimeError(
-            "Google no longer accepts this Gmail connection, it may have been revoked. "
-            "Disconnect and connect Gmail again in settings."
+            "Google could not refresh this Gmail connection right now. Try again shortly, or "
+            "disconnect and reconnect Gmail in settings if this keeps happening."
         )
     return resp.json()["access_token"]
 

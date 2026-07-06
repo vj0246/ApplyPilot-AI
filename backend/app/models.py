@@ -78,6 +78,11 @@ class Profile(Base):
     # access token at each send.
     gmail_address: Mapped[Optional[str]] = mapped_column(String(320))
     gmail_refresh_token_encrypted: Mapped[Optional[str]] = mapped_column(Text)
+    # While the Google OAuth app is in Testing mode, Google expires every
+    # refresh token after 7 days regardless of use — this timestamp is
+    # what lets the frontend warn someone before that happens instead of
+    # their next send just failing.
+    gmail_connected_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

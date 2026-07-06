@@ -7,7 +7,7 @@ import toast from "react-hot-toast";
 import { User, Briefcase, Sliders, Loader2, BrainCircuit, Mail, CheckCircle2, Plus, Trash2, ExternalLink } from "lucide-react";
 import { profileApi, authApi, emailApi } from "@/lib/api";
 import { Card, Textarea } from "@/components/ui";
-import { cn } from "@/lib/utils";
+import { cn, gmailExpiry } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 
 const TABS = [
@@ -592,14 +592,42 @@ function SettingsPageInner() {
                       </span>
                     )}
                   </div>
+                  {profile?.gmail_connected && (() => {
+                    const { daysLeft, warn } = gmailExpiry(profile.gmail_connected_at);
+                    if (daysLeft == null) return null;
+                    const hoursLeft = Math.round(daysLeft * 24);
+                    return (
+                      <p className={cn(
+                        "text-xs px-2.5 py-2 rounded-lg",
+                        warn ? "bg-amber-50 text-amber-700" : "text-gray-400"
+                      )}>
+                        {warn
+                          ? `This connection expires in about ${hoursLeft} hour${hoursLeft === 1 ? "" : "s"} — reconnect now so sending never breaks mid use.`
+                          : `Connection renews itself if you reconnect before it expires in about ${Math.round(daysLeft)} days.`}
+                      </p>
+                    );
+                  })()}
                   {profile?.gmail_connected ? (
-                    <button
-                      onClick={() => disconnectGmailMut.mutate()}
-                      disabled={disconnectGmailMut.isPending}
-                      className="btn-secondary text-red-600 border-red-200 hover:bg-red-50"
-                    >
-                      Disconnect Gmail
-                    </button>
+                    <div className="flex gap-2">
+                      {gmailExpiry(profile.gmail_connected_at).warn && (
+                        <button
+                          onClick={() => connectGmailMut.mutate()}
+                          disabled={connectGmailMut.isPending}
+                          className="btn-primary"
+                        >
+                          {connectGmailMut.isPending
+                            ? <Loader2 className="w-4 h-4 animate-spin" />
+                            : <>Reconnect now <ExternalLink className="w-3.5 h-3.5" /></>}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => disconnectGmailMut.mutate()}
+                        disabled={disconnectGmailMut.isPending}
+                        className="btn-secondary text-red-600 border-red-200 hover:bg-red-50"
+                      >
+                        Disconnect Gmail
+                      </button>
+                    </div>
                   ) : (
                     <button
                       onClick={() => connectGmailMut.mutate()}

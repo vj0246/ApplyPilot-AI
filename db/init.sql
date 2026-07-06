@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     smtp_password_encrypted TEXT,
     gmail_address    VARCHAR(320),
     gmail_refresh_token_encrypted TEXT,
+    gmail_connected_at TIMESTAMPTZ,
     created_at       TIMESTAMPTZ DEFAULT NOW(),
     updated_at       TIMESTAMPTZ DEFAULT NOW()
 );

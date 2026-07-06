@@ -91,6 +91,7 @@ def _out(p: Profile) -> dict:
         "sender_email": p.sender_email,
         "gmail_connected": bool(p.gmail_refresh_token_encrypted),
         "gmail_address": p.gmail_address,
+        "gmail_connected_at": p.gmail_connected_at.isoformat() if p.gmail_connected_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
 

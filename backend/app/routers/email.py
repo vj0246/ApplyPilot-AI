@@ -152,6 +152,7 @@ async def oauth_callback(
 
         profile.gmail_address = gmail_address
         profile.gmail_refresh_token_encrypted = crypto.encrypt(refresh_token)
+        profile.gmail_connected_at = datetime.now(timezone.utc)
         await db.commit()
         return RedirectResponse(f"{settings_url}&gmail=connected")
     except Exception as ex:
@@ -169,6 +170,7 @@ async def oauth_disconnect(
     if profile:
         profile.gmail_address = None
         profile.gmail_refresh_token_encrypted = None
+        profile.gmail_connected_at = None
         await db.commit()
     return {"gmail_connected": False}
 
@@ -353,6 +355,18 @@ async def send_email_now(
         e.sent_at = datetime.now(timezone.utc)
         e.error_msg = None
         await db.commit()
+    except gmail_service.GmailReauthRequired as ex:
+        # The stored connection is genuinely dead (7 day Testing mode
+        # expiry, or the user revoked access at myaccount.google.com) —
+        # clearing it here is what makes Settings show Connect Gmail
+        # again instead of a green Connected badge that lies.
+        profile.gmail_address = None
+        profile.gmail_refresh_token_encrypted = None
+        profile.gmail_connected_at = None
+        e.status = "failed"
+        e.error_msg = str(ex)[:400]
+        await db.commit()
+        raise HTTPException(401, f"Could not send the email. {e.error_msg}")
     except Exception as ex:
         e.status = "failed"
         e.error_msg = str(ex)[:400]

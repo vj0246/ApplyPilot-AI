@@ -1,13 +1,14 @@
 "use client";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import Link from "next/link";
+import toast from "react-hot-toast";
 import {
   SendHorizonal, ArrowRight, FileText, Link2, Send,
-  BrainCircuit, Mail, Sparkles,
+  BrainCircuit, Mail, Sparkles, AlertTriangle, Loader2, ExternalLink,
 } from "lucide-react";
-import { appApi, resumeApi, profileApi } from "@/lib/api";
+import { appApi, resumeApi, profileApi, emailApi } from "@/lib/api";
 import { Card, Skeleton } from "@/components/ui";
-import { STATUS_LABEL, STATUS_COLOR, fitColor, ago, cn } from "@/lib/utils";
+import { STATUS_LABEL, STATUS_COLOR, fitColor, ago, cn, gmailExpiry } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 
 export default function DashboardPage() {
@@ -28,10 +29,17 @@ export default function DashboardPage() {
 
   const items = apps?.items || [];
   const hasResume = (resumes?.items || []).some((r: any) => r.status === "ready");
-  const hasEmailAccount = !!profile?.email_account_configured;
+  const hasEmailAccount = !!profile?.email_account_configured || !!profile?.gmail_connected;
   const kg = profile?.knowledge_graph;
   const hasMemory = !!(kg && (kg.identity || (kg.values || []).length > 0));
   const setupDone = hasResume && hasEmailAccount && hasMemory;
+
+  const { warn: gmailWarn, daysLeft: gmailDaysLeft } = gmailExpiry(profile?.gmail_connected_at);
+  const reconnectGmailMut = useMutation({
+    mutationFn: () => emailApi.oauthStart(),
+    onSuccess: ({ data }) => { window.location.href = data.url; },
+    onError: (err: any) => toast.error(err.response?.data?.detail || "Could not start the Gmail connection"),
+  });
 
   return (
     <div className="p-8 max-w-5xl">
@@ -41,6 +49,32 @@ export default function DashboardPage() {
         </h1>
         <p className="page-desc">Two things happen here: forms get filled, applications get mailed</p>
       </div>
+
+      {/* Gmail in this app runs on a Google OAuth app still in Testing
+          mode, which expires every connection after 7 days no matter
+          what — this is the heads up that beats a send just failing */}
+      {profile?.gmail_connected && gmailWarn && (
+        <Card className="mb-6 bg-amber-50 border-amber-100">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+            <div className="flex-1">
+              <p className="font-medium text-gray-900 text-sm">
+                Your Gmail connection expires in about {Math.max(1, Math.round((gmailDaysLeft || 0) * 24))} hours
+              </p>
+              <p className="text-amber-700 text-sm">Reconnect now so sending an application never breaks mid use.</p>
+            </div>
+            <button
+              onClick={() => reconnectGmailMut.mutate()}
+              disabled={reconnectGmailMut.isPending}
+              className="btn-primary text-sm shrink-0"
+            >
+              {reconnectGmailMut.isPending
+                ? <Loader2 className="w-4 h-4 animate-spin" />
+                : <>Reconnect <ExternalLink className="w-3.5 h-3.5" /></>}
+            </button>
+          </div>
+        </Card>
+      )}
 
       {/* Setup checklist — the AI writes from the resume and the memory,
           and the mailer sends from the connected account, so these three

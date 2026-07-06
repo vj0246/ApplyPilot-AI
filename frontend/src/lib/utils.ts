@@ -18,6 +18,17 @@ export function ago(date: string | Date) {
   return fmt(date);
 }
 
+// While the Google OAuth app is in Testing mode, Google expires every
+// Gmail connection after exactly 7 days no matter how it's used. Warn at
+// 6.5 days so someone gets a heads up and a working reconnect button
+// before their next send just fails.
+export function gmailExpiry(connectedAt?: string | null) {
+  if (!connectedAt) return { daysLeft: null, warn: false, expired: false };
+  const elapsedDays = (Date.now() - new Date(connectedAt).getTime()) / 86400000;
+  const daysLeft = Math.max(0, 7 - elapsedDays);
+  return { daysLeft, warn: daysLeft <= 0.5, expired: daysLeft <= 0 };
+}
+
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: "$", EUR: "€", GBP: "£", INR: "₹", CAD: "$", AUD: "$",
 };
