@@ -89,6 +89,8 @@ def _out(p: Profile) -> dict:
         "knowledge_graph": p.knowledge_graph or {},
         "email_account_configured": bool(p.smtp_password_encrypted),
         "sender_email": p.sender_email,
+        "gmail_connected": bool(p.gmail_refresh_token_encrypted),
+        "gmail_address": p.gmail_address,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
 

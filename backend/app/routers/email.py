@@ -18,22 +18,27 @@ pasted case is parsed on the fly and never written to the jobs table —
 mailing one job description about a role you are not tracking should not
 force it into your saved job list.
 """
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import crypto
+from app.core.config import settings
 from app.core.database import get_db
+from app.core.auth import decode_token
 from app.models import EmailSend, Job, Profile, Resume, User
 from app.routers.auth import get_current_user
-from app.services import ai_service, email_service
+from app.services import ai_service, email_service, gmail_service
 
 router = APIRouter(prefix="/email", tags=["email"])
+log = logging.getLogger(__name__)
 
 
 class EmailDraftIn(BaseModel):
@@ -66,6 +71,93 @@ def _out(e: EmailSend) -> dict:
         "sent_at": e.sent_at.isoformat() if e.sent_at else None,
         "created_at": e.created_at.isoformat() if e.created_at else None,
     }
+
+
+@router.get("/oauth/status")
+async def oauth_status():
+    return {"available": gmail_service.is_configured()}
+
+
+@router.get("/oauth/start")
+async def oauth_start(request: Request, u: User = Depends(get_current_user)):
+    """Returns the Google consent URL for the frontend to redirect the
+    browser to. The state parameter carries the caller's own access
+    token rather than a separate server side session, because the
+    redirect back in oauth_callback below arrives as a plain browser
+    navigation from Google with no Authorization header at all — the
+    token, which Google only ever sees as an opaque string it echoes
+    back unchanged, is what lets the callback know whose profile to
+    attach the connection to."""
+    if not gmail_service.is_configured():
+        raise HTTPException(
+            503,
+            "Gmail sending is not set up on this server yet. Ask the administrator to add "
+            "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.",
+        )
+    raw_token = request.headers["Authorization"][7:]
+    return {"url": gmail_service.build_auth_url(state=raw_token)}
+
+
+@router.get("/oauth/callback")
+async def oauth_callback(
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Google redirects the user's browser here after the consent
+    screen. No Authorization header exists on this request — the state
+    parameter carries the token that came back from oauth_start, and
+    the whole exchange either lands on the settings page with a plain
+    success or failure flag for the frontend to show, since there is no
+    JSON caller waiting on the other end of a browser redirect."""
+    settings_url = f"{settings.FRONTEND_URL.rstrip('/')}/settings?tab=email"
+    if error:
+        return RedirectResponse(f"{settings_url}&gmail=denied")
+    if not code or not state:
+        return RedirectResponse(f"{settings_url}&gmail=error")
+
+    payload = decode_token(state)
+    if not payload:
+        return RedirectResponse(f"{settings_url}&gmail=error")
+
+    try:
+        tokens = await gmail_service.exchange_code(code)
+        refresh_token = tokens.get("refresh_token")
+        gmail_address = gmail_service.email_from_id_token(tokens.get("id_token", ""))
+        if not refresh_token or not gmail_address:
+            # Google omits refresh_token on a repeat consent for an
+            # account that never revoked the last one — the fix is
+            # revoking access at myaccount.google.com/permissions once,
+            # which forces prompt=consent to actually issue a new one.
+            return RedirectResponse(f"{settings_url}&gmail=noconsent")
+
+        res = await db.execute(select(Profile).where(Profile.user_id == uuid.UUID(payload["sub"])))
+        profile = res.scalar_one_or_none()
+        if not profile:
+            return RedirectResponse(f"{settings_url}&gmail=error")
+
+        profile.gmail_address = gmail_address
+        profile.gmail_refresh_token_encrypted = crypto.encrypt(refresh_token)
+        await db.commit()
+        return RedirectResponse(f"{settings_url}&gmail=connected")
+    except Exception as ex:
+        log.error(f"Gmail OAuth callback failed: {ex}")
+        return RedirectResponse(f"{settings_url}&gmail=error")
+
+
+@router.delete("/oauth/disconnect")
+async def oauth_disconnect(
+    u: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    res = await db.execute(select(Profile).where(Profile.user_id == u.id))
+    profile = res.scalar_one_or_none()
+    if profile:
+        profile.gmail_address = None
+        profile.gmail_refresh_token_encrypted = None
+        await db.commit()
+    return {"gmail_connected": False}
 
 
 @router.post("/draft", status_code=201)
@@ -171,11 +263,13 @@ async def send_email_now(
 
     res = await db.execute(select(Profile).where(Profile.user_id == u.id))
     profile = res.scalar_one_or_none()
-    if not profile or not profile.smtp_password_encrypted:
+    use_gmail = bool(profile and profile.gmail_refresh_token_encrypted)
+    use_smtp = bool(profile and profile.smtp_password_encrypted)
+    if not profile or not (use_gmail or use_smtp):
         raise HTTPException(
             422,
-            "No sending account is configured yet. Add your email address and app password in "
-            "settings before sending.",
+            "No sending account is configured yet. Connect Gmail, or add your email address and "
+            "app password, in settings before sending.",
         )
 
     # The resume goes out attached to every application email, no
@@ -213,19 +307,35 @@ async def send_email_now(
         )
 
     try:
-        password = crypto.decrypt(profile.smtp_password_encrypted)
-        await email_service.send_email(
-            smtp_host=profile.smtp_host,
-            smtp_port=profile.smtp_port or 587,
-            smtp_username=profile.smtp_username,
-            smtp_password=password,
-            sender_email=profile.sender_email,
-            recipient_email=e.recipient_email,
-            subject=e.subject,
-            body=e.body,
-            attachment_bytes=attachment_bytes,
-            attachment_filename=attachment_filename,
-        )
+        if use_gmail:
+            # The path that actually works from Render: HTTPS to the
+            # Gmail API, never blocked, unlike raw SMTP on this host.
+            # Preferred whenever both are connected, since it is also
+            # the more reliable path on any host.
+            refresh_token = crypto.decrypt(profile.gmail_refresh_token_encrypted)
+            msg = email_service.build_message(
+                sender_email=profile.gmail_address,
+                recipient_email=e.recipient_email,
+                subject=e.subject,
+                body=e.body,
+                attachment_bytes=attachment_bytes,
+                attachment_filename=attachment_filename,
+            )
+            await gmail_service.send_message(refresh_token, msg)
+        else:
+            password = crypto.decrypt(profile.smtp_password_encrypted)
+            await email_service.send_email(
+                smtp_host=profile.smtp_host,
+                smtp_port=profile.smtp_port or 587,
+                smtp_username=profile.smtp_username,
+                smtp_password=password,
+                sender_email=profile.sender_email,
+                recipient_email=e.recipient_email,
+                subject=e.subject,
+                body=e.body,
+                attachment_bytes=attachment_bytes,
+                attachment_filename=attachment_filename,
+            )
         e.status = "sent"
         e.sent_at = datetime.now(timezone.utc)
         e.error_msg = None

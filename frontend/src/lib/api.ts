@@ -118,4 +118,7 @@ export const emailApi = {
   get: (id: string) => api.get(`/email/${id}`),
   update: (id: string, d: { subject?: string; body?: string }) => api.patch(`/email/${id}`, d),
   send: (id: string) => api.post(`/email/${id}/send`),
+  oauthStatus: () => api.get("/email/oauth/status"),
+  oauthStart: () => api.get("/email/oauth/start"),
+  oauthDisconnect: () => api.delete("/email/oauth/disconnect"),
 };

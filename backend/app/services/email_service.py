@@ -100,7 +100,7 @@ def _body_to_html(body: str) -> str:
     )
 
 
-def _build_message(
+def build_message(
     sender_email: str,
     recipient_email: str,
     subject: str,
@@ -108,6 +108,10 @@ def _build_message(
     attachment_bytes: Optional[bytes] = None,
     attachment_filename: Optional[str] = None,
 ) -> MIMEMultipart:
+    """Public on purpose — the Gmail API send path (gmail_service.py)
+    builds the exact same MIME message as the SMTP path and only differs
+    in how it leaves the server, so both paths share one place that
+    defines what an application email actually looks like."""
     # multipart/mixed wrapping multipart/alternative is the standard shape
     # for "formatted email with an attachment": clients that render HTML
     # show the formatted version, everything else falls back to the exact
@@ -156,8 +160,8 @@ def _send_sync(
     attachment_bytes: Optional[bytes] = None,
     attachment_filename: Optional[str] = None,
 ) -> None:
-    msg = _build_message(sender_email, recipient_email, subject, body,
-                         attachment_bytes, attachment_filename)
+    msg = build_message(sender_email, recipient_email, subject, body,
+                        attachment_bytes, attachment_filename)
 
     # The port the user configured is tried first. If it hangs rather than
     # cleanly refusing, that is the signature of a network in between

@@ -72,6 +72,13 @@ class Profile(Base):
     smtp_username: Mapped[Optional[str]] = mapped_column(String(320))
     smtp_password_encrypted: Mapped[Optional[str]] = mapped_column(Text)
 
+    # Gmail API connection — the sending path that actually works from
+    # Render (SMTP egress is blocked there). The refresh token is Fernet
+    # encrypted like the SMTP password and exchanged for a short lived
+    # access token at each send.
+    gmail_address: Mapped[Optional[str]] = mapped_column(String(320))
+    gmail_refresh_token_encrypted: Mapped[Optional[str]] = mapped_column(Text)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

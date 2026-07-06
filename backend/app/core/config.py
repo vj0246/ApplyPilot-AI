@@ -29,6 +29,16 @@ class Settings(BaseSettings):
     def GROQ_API_KEYS(self) -> list[str]:
         return [k.strip() for k in self.GROQ_API_KEY.split(",") if k.strip()]
 
+    # Gmail API OAuth — the production mail path. Render blocks outbound
+    # SMTP ports network wide, so on Render mail can only leave over
+    # HTTPS; the Gmail API sends from the user's own account after they
+    # connect it once. Empty values simply hide the Connect Gmail option.
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    # Public base URL of this backend, used to build the OAuth redirect
+    # URI (must match the one registered in the Google Cloud console).
+    BACKEND_URL: str = "http://localhost:8000"
+
     # Files
     UPLOAD_DIR: str = "./uploads"
     MAX_FILE_SIZE_MB: int = 10

@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     smtp_port        INTEGER,
     smtp_username    VARCHAR(320),
     smtp_password_encrypted TEXT,
+    gmail_address    VARCHAR(320),
+    gmail_refresh_token_encrypted TEXT,
     created_at       TIMESTAMPTZ DEFAULT NOW(),
     updated_at       TIMESTAMPTZ DEFAULT NOW()
 );

@@ -16,6 +16,18 @@
 #                  until they re-enter their app password
 #   FRONTEND_URL   https://your-app.vercel.app  (exact origin, no trailing
 #                  slash — this is what CORS allows)
+#
+# Mail sending on Render must go through the Gmail API, not raw SMTP —
+# Render blocks outbound SMTP ports (25, 587, 465) network wide on every
+# plan, so an app password will time out no matter what the code does.
+# Set these two for the Connect Gmail button in settings to work:
+#
+#   GOOGLE_CLIENT_ID       OAuth client from console.cloud.google.com,
+#   GOOGLE_CLIENT_SECRET   type Web application, with this redirect URI
+#                          registered exactly:
+#                          https://YOUR-RENDER-URL/api/v1/email/oauth/callback
+#   BACKEND_URL            https://YOUR-RENDER-URL (no trailing slash) —
+#                          must match the host in that redirect URI
 
 services:
   - type: web
@@ -32,6 +44,12 @@ services:
       - key: SECRET_KEY
         sync: false
       - key: FRONTEND_URL
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: BACKEND_URL
         sync: false
       - key: GROQ_MODEL
         value: openai/gpt-oss-120b

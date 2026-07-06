@@ -39,6 +39,8 @@ export interface Profile {
   knowledge_graph?: KnowledgeGraph;
   email_account_configured?: boolean;
   sender_email?: string;
+  gmail_connected?: boolean;
+  gmail_address?: string;
   updated_at?: string;
 }
 

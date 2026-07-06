@@ -4,8 +4,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import toast from "react-hot-toast";
-import { User, Briefcase, Sliders, Loader2, BrainCircuit, Mail, CheckCircle2, Plus, Trash2 } from "lucide-react";
-import { profileApi, authApi } from "@/lib/api";
+import { User, Briefcase, Sliders, Loader2, BrainCircuit, Mail, CheckCircle2, Plus, Trash2, ExternalLink } from "lucide-react";
+import { profileApi, authApi, emailApi } from "@/lib/api";
 import { Card, Textarea } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
@@ -43,7 +43,44 @@ function SettingsPageInner() {
   useEffect(() => {
     if (TABS.some(t => t.id === urlTab)) setTab(urlTab as string);
   }, [urlTab]);
+
   const qc = useQueryClient();
+
+  // The Gmail OAuth callback lands the browser back here with a plain
+  // ?gmail= flag on the URL, since that redirect comes straight from
+  // Google with no way to run frontend code in between.
+  const gmailResult = searchParams.get("gmail");
+  useEffect(() => {
+    if (!gmailResult) return;
+    const messages: Record<string, string> = {
+      connected: "Gmail connected, application emails now send from that address",
+      denied: "Gmail connection was cancelled",
+      noconsent: "Google did not return a fresh connection. Revoke ApplyPilot's access at myaccount.google.com/permissions, then try connecting again",
+      error: "Could not connect Gmail, try again",
+    };
+    if (messages[gmailResult]) {
+      if (gmailResult === "connected") toast.success(messages[gmailResult]);
+      else toast.error(messages[gmailResult]);
+    }
+    qc.invalidateQueries({ queryKey: ["profile"] });
+    window.history.replaceState(null, "", "/settings?tab=email");
+  }, [gmailResult, qc]);
+
+  const { data: gmailOauthStatus } = useQuery({
+    queryKey: ["gmail-oauth-status"],
+    queryFn: () => emailApi.oauthStatus().then(r => r.data),
+  });
+
+  const connectGmailMut = useMutation({
+    mutationFn: () => emailApi.oauthStart(),
+    onSuccess: ({ data }) => { window.location.href = data.url; },
+    onError: (err: any) => toast.error(err.response?.data?.detail || "Could not start the Gmail connection"),
+  });
+
+  const disconnectGmailMut = useMutation({
+    mutationFn: () => emailApi.oauthDisconnect(),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["profile"] }); toast.success("Gmail disconnected"); },
+  });
   const { user, logout } = useAuth();
 
   const { data: profile, isLoading } = useQuery({
@@ -539,15 +576,58 @@ function SettingsPageInner() {
                 </div>
               </Card>
 
+              {gmailOauthStatus?.available && (
+                <Card className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="font-semibold text-gray-900">Connect Gmail</h2>
+                      <p className="text-sm text-gray-500">
+                        The most reliable way to send: one click, no app password to generate or
+                        paste, and it is used automatically whenever it is connected.
+                      </p>
+                    </div>
+                    {profile?.gmail_connected && (
+                      <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full flex items-center gap-1 shrink-0">
+                        <CheckCircle2 className="w-3.5 h-3.5" /> {profile.gmail_address}
+                      </span>
+                    )}
+                  </div>
+                  {profile?.gmail_connected ? (
+                    <button
+                      onClick={() => disconnectGmailMut.mutate()}
+                      disabled={disconnectGmailMut.isPending}
+                      className="btn-secondary text-red-600 border-red-200 hover:bg-red-50"
+                    >
+                      Disconnect Gmail
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => connectGmailMut.mutate()}
+                      disabled={connectGmailMut.isPending}
+                      className="btn-primary"
+                    >
+                      {connectGmailMut.isPending
+                        ? <Loader2 className="w-4 h-4 animate-spin" />
+                        : <>Connect Gmail <ExternalLink className="w-3.5 h-3.5" /></>}
+                    </button>
+                  )}
+                </Card>
+              )}
+
               <Card className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <h2 className="font-semibold text-gray-900">Sending account</h2>
+                  <h2 className="font-semibold text-gray-900">Sending account (app password)</h2>
                   {profile?.email_account_configured && (
                     <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full flex items-center gap-1">
                       <CheckCircle2 className="w-3.5 h-3.5" /> Connected as {profile.sender_email}
                     </span>
                   )}
                 </div>
+                {gmailOauthStatus?.available && (
+                  <p className="text-xs text-gray-400">
+                    Only used when Gmail above is not connected.
+                  </p>
+                )}
 
                 <div>
                   <label className="label">Your email address</label>
