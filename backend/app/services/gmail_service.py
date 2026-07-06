@@ -121,8 +121,18 @@ async def send_message(refresh_token: str, msg: MIMEMultipart) -> None:
             json={"raw": raw},
         )
     if resp.status_code not in (200, 202):
-        log.error(f"Gmail send failed: {resp.status_code} {resp.text[:300]}")
+        log.error(f"Gmail send failed: {resp.status_code} {resp.text[:500]}")
+        # Google's own error message is the only way to tell "Gmail API
+        # not enabled on this project" apart from "scope was never
+        # actually granted" apart from "account not a registered test
+        # user" — three completely different fixes that all produce a
+        # bare 403 with no other signal, so it is surfaced verbatim
+        # instead of guessed at.
+        reason = resp.text[:300]
+        try:
+            reason = resp.json().get("error", {}).get("message", reason)
+        except Exception:
+            pass
         raise RuntimeError(
-            f"Gmail refused to send the message (status {resp.status_code}). "
-            "If this keeps happening, disconnect and reconnect Gmail in settings."
+            f"Gmail refused to send the message (status {resp.status_code}): {reason}"
         )
