@@ -14,6 +14,7 @@ human in the loop rule as the form autofill: the AI drafts, a person
 decides when it actually goes out.
 """
 import asyncio
+import base64
 import html
 import logging
 import re
@@ -25,7 +26,59 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional
 
+import httpx
+
+from app.core.config import settings
+
 log = logging.getLogger(__name__)
+
+
+def relay_configured() -> bool:
+    return bool(settings.RELAY_URL and settings.RELAY_SECRET)
+
+
+async def send_via_relay(
+    smtp_host: str,
+    smtp_port: int,
+    smtp_username: str,
+    smtp_password: str,
+    sender_email: str,
+    recipient_email: str,
+    subject: str,
+    body: str,
+    attachment_bytes: Optional[bytes] = None,
+    attachment_filename: Optional[str] = None,
+) -> None:
+    """Hands the finished message to the external SMTP relay over HTTPS.
+    Render blocks outbound SMTP, so this is how a user's own Gmail app
+    password actually sends from their own mailbox in production: the
+    relay (a host that allows outbound SMTP) does the SMTP leg. The exact
+    same build_message output is reused, so the recipient gets an
+    identical email whether it left via relay, Gmail API, or SendGrid."""
+    msg = build_message(sender_email, recipient_email, subject, body,
+                        attachment_bytes, attachment_filename)
+    payload = {
+        "host": smtp_host,
+        "port": smtp_port or 587,
+        "username": smtp_username,
+        "password": smtp_password,
+        "sender": sender_email,
+        "recipient": recipient_email,
+        "raw_message_b64": base64.b64encode(msg.as_bytes()).decode(),
+    }
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(
+            f"{settings.RELAY_URL.rstrip('/')}/send",
+            headers={"Authorization": f"Bearer {settings.RELAY_SECRET}"},
+            json=payload,
+        )
+    if resp.status_code != 200:
+        detail = resp.text[:300]
+        try:
+            detail = resp.json().get("detail", detail)
+        except Exception:
+            pass
+        raise RuntimeError(f"Could not send the email through the relay: {detail}")
 
 
 def _connect_any(host: str, port: int, timeout) -> socket.socket:

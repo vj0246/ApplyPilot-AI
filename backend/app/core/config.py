@@ -51,6 +51,18 @@ class Settings(BaseSettings):
     SENDGRID_API_KEY: str = ""
     SENDGRID_FROM_EMAIL: str = ""
 
+    # SMTP relay — the "send from the user's own Gmail" path. Render blocks
+    # outbound SMTP, so when a user connects their own address with a Gmail
+    # app password, the backend cannot reach smtp.gmail.com itself. Instead
+    # it hands the finished message to this small relay service (deployed on
+    # a host that allows outbound SMTP, e.g. Fly.io — see relay/), which
+    # does the actual SMTP send from the user's mailbox and returns. Empty
+    # RELAY_URL means the app password path stays local dev only, exactly as
+    # before. RELAY_SECRET must match the value set on the relay so only
+    # this backend can drive it.
+    RELAY_URL: str = ""
+    RELAY_SECRET: str = ""
+
     # Files
     UPLOAD_DIR: str = "./uploads"
     MAX_FILE_SIZE_MB: int = 10

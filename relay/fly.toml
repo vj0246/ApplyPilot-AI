@@ -1,0 +1,27 @@
+# Fly.io app definition for the ApplyPilot SMTP relay.
+#
+# Deploy from inside this relay/ directory:
+#   fly launch --no-deploy --copy-config --name applypilot-relay --region sin
+#   fly secrets set RELAY_SECRET=<same long random value set on the backend>
+#   fly deploy
+#
+# Then read the public URL (https://applypilot-relay.fly.dev) and set it as
+# RELAY_URL on the Render backend. The machine sleeps when idle
+# (min_machines_running = 0) and wakes on the next send; a cold start adds
+# a couple of seconds to the first email after a quiet period, which is
+# fine for this workload and keeps it inside the free allowance.
+app = "applypilot-relay"
+primary_region = "sin"
+
+[build]
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

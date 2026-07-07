@@ -22,15 +22,29 @@
 # so an app password will time out no matter what the code does. Two
 # HTTPS paths exist, and either alone is enough for sending to work:
 #
-#   SENDGRID_API_KEY       The default, zero setup path for every user.
-#   SENDGRID_FROM_EMAIL    Free SendGrid account, one sender address
-#                          verified by clicking a link SendGrid emails
-#                          you (Settings, Sender Authentication, Single
-#                          Sender Verification) — no domain or DNS
-#                          needed. SENDGRID_FROM_EMAIL is that address.
-#                          Every user's email sends from here by
-#                          default, with Reply To set to their own
-#                          address so replies still reach them.
+#   RELAY_URL              The "send from the user's own Gmail" path.
+#   RELAY_SECRET           A user connects their address with a Gmail app
+#                          password; because Render blocks outbound SMTP,
+#                          the backend hands the finished message to the
+#                          relay service (see relay/, deployed on Fly.io
+#                          which does allow outbound SMTP) which sends it
+#                          from the user's own mailbox. RELAY_URL is the
+#                          relay's public https URL; RELAY_SECRET is a
+#                          long random value that must match the one set
+#                          on the relay, so only this backend can drive
+#                          it. This is now the recommended path: mail
+#                          from the user's real address lands in the
+#                          inbox and reads as genuinely from them.
+#
+#   SENDGRID_API_KEY       Zero setup fallback for users who have not
+#   SENDGRID_FROM_EMAIL    connected their own address. Free SendGrid
+#                          account, one sender verified by clicking a
+#                          link (Single Sender Verification, no domain or
+#                          DNS). Sends from that shared sender with Reply
+#                          To set to the applicant, but with no domain
+#                          authentication it often lands in spam — which
+#                          is exactly why the RELAY path above is
+#                          preferred for anyone who sets it up.
 #
 #   GOOGLE_CLIENT_ID       Optional upgrade: lets a user connect their
 #   GOOGLE_CLIENT_SECRET   own Gmail so mail leaves from their literal
@@ -73,6 +87,10 @@ services:
       - key: SENDGRID_API_KEY
         sync: false
       - key: SENDGRID_FROM_EMAIL
+        sync: false
+      - key: RELAY_URL
+        sync: false
+      - key: RELAY_SECRET
         sync: false
       - key: GROQ_MODEL
         value: openai/gpt-oss-120b

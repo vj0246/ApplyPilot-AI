@@ -285,16 +285,17 @@ async def send_email_now(
     profile = res.scalar_one_or_none()
     use_gmail = bool(profile and profile.gmail_refresh_token_encrypted)
     use_smtp = bool(profile and profile.smtp_password_encrypted)
-    use_sendgrid = bool(not use_gmail and sendgrid_service.is_configured())
-    # SendGrid is the always available fallback — nobody has to set
-    # anything up for it, so it only ever loses to Gmail, which someone
-    # has to have deliberately connected because it sends from their own
-    # literal address.
+    # A user's own address always wins over the shared SendGrid sender:
+    # both Gmail OAuth and the app password path send from the applicant's
+    # literal mailbox, which lands in the inbox and reads as genuinely
+    # from them. SendGrid is only the zero setup fallback for someone who
+    # has connected nothing of their own yet.
+    use_sendgrid = bool(not use_gmail and not use_smtp and sendgrid_service.is_configured())
     if not (use_gmail or use_smtp or use_sendgrid):
         raise HTTPException(
             422,
-            "No sending account is configured yet. Connect Gmail, or add your email address and "
-            "app password, in settings before sending.",
+            "No sending account is configured yet. Add your own email address and app password in "
+            "settings so applications send from your mailbox.",
         )
 
     # The resume goes out attached to every application email, no
@@ -347,6 +348,31 @@ async def send_email_now(
                 attachment_filename=attachment_filename,
             )
             await gmail_service.send_message(refresh_token, msg)
+        elif use_smtp:
+            # The user connected their own address with a Gmail app
+            # password. Render blocks outbound SMTP, so in production this
+            # goes through the external relay (relay/), which does the SMTP
+            # leg from a host that allows it — the message still leaves the
+            # user's own mailbox. Falls back to a direct SMTP connection
+            # only when no relay is configured (local dev / docker compose,
+            # where outbound SMTP works).
+            password = crypto.decrypt(profile.smtp_password_encrypted)
+            smtp_args = dict(
+                smtp_host=profile.smtp_host,
+                smtp_port=profile.smtp_port or 587,
+                smtp_username=profile.smtp_username,
+                smtp_password=password,
+                sender_email=profile.sender_email,
+                recipient_email=e.recipient_email,
+                subject=e.subject,
+                body=e.body,
+                attachment_bytes=attachment_bytes,
+                attachment_filename=attachment_filename,
+            )
+            if email_service.relay_configured():
+                await email_service.send_via_relay(**smtp_args)
+            else:
+                await email_service.send_email(**smtp_args)
         elif use_sendgrid:
             # The default path: works for every user with nothing set up
             # on their end. Reply To carries the applicant's own address
@@ -365,20 +391,6 @@ async def send_email_now(
                 attachment_filename=attachment_filename,
             )
             await sendgrid_service.send_message(msg, reply_email, reply_name)
-        else:
-            password = crypto.decrypt(profile.smtp_password_encrypted)
-            await email_service.send_email(
-                smtp_host=profile.smtp_host,
-                smtp_port=profile.smtp_port or 587,
-                smtp_username=profile.smtp_username,
-                smtp_password=password,
-                sender_email=profile.sender_email,
-                recipient_email=e.recipient_email,
-                subject=e.subject,
-                body=e.body,
-                attachment_bytes=attachment_bytes,
-                attachment_filename=attachment_filename,
-            )
         e.status = "sent"
         e.sent_at = datetime.now(timezone.utc)
         e.error_msg = None
