@@ -213,40 +213,31 @@ function ApplyPageInner() {
   // Opens the applicant's own mail client with the draft pre-filled, so
   // it genuinely sends from their real address with no server, no OAuth,
   // no per-user setup — works for anyone regardless of email provider.
-  // Nothing is written to the user's device just by sending: the resume
-  // is NOT auto-downloaded here. Browsers block attaching a file to a
-  // mailto: link, so anyone who wants the resume attached grabs it with
-  // the separate, explicit "download resume" button below.
+  // Browsers block attaching a file to a mailto: link, so to guarantee
+  // the resume always rides along (the compulsory attachment rule) it is
+  // downloaded at the same moment for a one click manual attach.
   const openMailAppMut = useMutation({
     mutationFn: async () => {
+      const rid = emailResumeId || resumeId;
+      const resume = readyResumes.find((r: any) => r.id === rid);
+      if (rid) {
+        const res = await resumeApi.download(rid);
+        const url = URL.createObjectURL(new Blob([res.data]));
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = resume?.filename || "resume";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
       const to = emailDraft?.recipient_email || recipientEmail.trim();
       const body = bodyValue.replace(/\n/g, "\r\n");
       window.location.href =
         `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subjectValue)}&body=${encodeURIComponent(body)}`;
     },
-    onSuccess: () => toast.success("Opening your mail app — review it and send"),
-    onError: () => toast.error("Could not open your mail app"),
-  });
-
-  // Explicit, user initiated resume download — only runs when the person
-  // actually clicks it, never automatically on send.
-  const downloadResumeMut = useMutation({
-    mutationFn: async () => {
-      const rid = emailResumeId || resumeId;
-      const resume = readyResumes.find((r: any) => r.id === rid);
-      if (!rid) throw new Error("no resume");
-      const res = await resumeApi.download(rid);
-      const url = URL.createObjectURL(new Blob([res.data]));
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = resume?.filename || "resume";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    },
-    onSuccess: () => toast.success("Resume downloaded — attach it in your mail app"),
-    onError: () => toast.error("Could not download the resume"),
+    onSuccess: () => toast.success("Resume downloaded, your mail app is opening — attach it, then send"),
+    onError: () => toast.error("Could not download the resume to attach"),
   });
 
   const noResume = readyResumes.length === 0;
@@ -863,23 +854,10 @@ function ApplyPageInner() {
                       )}
                     </button>
                   )}
-                  {!canServerSend && (
-                    <button
-                      onClick={() => downloadResumeMut.mutate()}
-                      disabled={downloadResumeMut.isPending}
-                      className="text-xs text-indigo-500 hover:text-indigo-700 w-full text-center flex items-center justify-center gap-1"
-                    >
-                      {downloadResumeMut.isPending ? (
-                        <><Loader2 className="w-3 h-3 animate-spin" /> Preparing...</>
-                      ) : (
-                        <><FileText className="w-3 h-3" /> Download my resume to attach (optional)</>
-                      )}
-                    </button>
-                  )}
                   <p className="text-xs text-gray-400">
                     {canServerSend
-                      ? "Send from my Gmail sends instantly from your connected address, resume attached automatically. The mail app option opens your own mail client with the draft ready to send from your address."
-                      : "This opens your own mail client (Gmail, Outlook, or whatever you use) with the draft already filled in, so it goes from your real address. Nothing is saved to your device. If you want to include your resume, use the download link above and attach it, since mail apps block automatic attachments. Connect Gmail in settings for one click sending with the resume attached for you."}
+                      ? "Send from my Gmail sends instantly from your connected address, resume attached automatically. The mail app option opens your own mail client with the draft ready, and downloads your resume for you to attach by hand."
+                      : "This opens your own mail client (Gmail, Outlook, or whatever you use) with the draft already filled in, so it goes from your real address. Your resume downloads at the same time, attach it with one click before you send, since mail apps block automatic attachments. Connect Gmail in settings for one click sending with the resume attached for you."}
                   </p>
                 </>
               )}
