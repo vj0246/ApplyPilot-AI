@@ -807,17 +807,6 @@ function ApplyPageInner() {
                       Save edits
                     </button>
                     <button
-                      onClick={() => openMailAppMut.mutate()}
-                      disabled={openMailAppMut.isPending || !recipientEmail.trim()}
-                      className="btn-secondary flex-1 justify-center"
-                    >
-                      {openMailAppMut.isPending ? (
-                        <><Loader2 className="w-4 h-4 animate-spin" /> Preparing...</>
-                      ) : (
-                        <><Mail className="w-4 h-4" /> Open in my mail app</>
-                      )}
-                    </button>
-                    <button
                       onClick={() => sendEmailMut.mutate()}
                       disabled={sendEmailMut.isPending}
                       className="btn-primary flex-1 justify-center"
@@ -825,16 +814,26 @@ function ApplyPageInner() {
                       {sendEmailMut.isPending ? (
                         <><Loader2 className="w-4 h-4 animate-spin" /> Sending...</>
                       ) : (
-                        <><Send className="w-4 h-4" /> Send via ApplyPilot</>
+                        <><Send className="w-4 h-4" /> Send now</>
                       )}
                     </button>
                   </div>
+                  <button
+                    onClick={() => openMailAppMut.mutate()}
+                    disabled={openMailAppMut.isPending || !recipientEmail.trim()}
+                    className="text-xs text-gray-400 hover:text-gray-600 w-full text-center flex items-center justify-center gap-1"
+                  >
+                    {openMailAppMut.isPending ? (
+                      <><Loader2 className="w-3 h-3 animate-spin" /> Preparing...</>
+                    ) : (
+                      <><Mail className="w-3 h-3" /> Or open in my own mail app instead (requires one set up on this device)</>
+                    )}
+                  </button>
                   <p className="text-xs text-gray-400">
-                    "Open in my mail app" opens Gmail, Outlook, or whatever you use, pre-filled and
-                    ready, and sends from your real address — no setup, works for anyone. It
-                    downloads your resume at the same time; attach it before you hit send, mail
-                    apps block automatic attachments for security. "Send via ApplyPilot" sends
-                    instantly from our server instead, resume attached automatically.
+                    "Send now" sends instantly, resume attached automatically, no setup needed on
+                    your end. The mail app option below leaves from your own literal address, but
+                    only works if you have Gmail, Outlook, or similar set up as an app already, and
+                    it downloads your resume for you to attach by hand.
                   </p>
                 </>
               )}
