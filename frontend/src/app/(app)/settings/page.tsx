@@ -150,7 +150,7 @@ function SettingsPageInner() {
 
   const LIST_FIELDS = [
     "values", "strengths", "motivations", "work_style", "goals",
-    "knowledge_areas", "interests", "priorities",
+    "knowledge_areas", "experience", "projects", "interests", "priorities",
   ] as const;
 
   const openMemoryEditor = () => {
@@ -416,6 +416,12 @@ function SettingsPageInner() {
                   )}
                   {((knowledgeGraph as any)?.knowledge_areas || []).length > 0 && (
                     <p className="text-sm text-gray-700"><span className="font-medium">Knows deeply: </span>{(knowledgeGraph as any).knowledge_areas.join(", ")}</p>
+                  )}
+                  {((knowledgeGraph as any)?.experience || []).length > 0 && (
+                    <p className="text-sm text-gray-700"><span className="font-medium">Experience: </span>{(knowledgeGraph as any).experience.join("; ")}</p>
+                  )}
+                  {((knowledgeGraph as any)?.projects || []).length > 0 && (
+                    <p className="text-sm text-gray-700"><span className="font-medium">Projects: </span>{(knowledgeGraph as any).projects.join("; ")}</p>
                   )}
                   {((knowledgeGraph as any)?.interests || []).length > 0 && (
                     <p className="text-sm text-gray-700"><span className="font-medium">Interests: </span>{(knowledgeGraph as any).interests.join(", ")}</p>

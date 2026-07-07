@@ -27,6 +27,8 @@ KNOWLEDGE_GRAPH_QUESTIONS = [
     "How do people who work closely with you tend to describe you?",
     "What are you working toward over the next few years?",
     "What subjects or fields do you know most deeply, and how did you get there?",
+    "Walk me through your work or internship experience so far. Where have you worked, what did you actually do there, and what came of it?",
+    "What projects have you built or contributed to that you would want an employer to know about? For each one, what does it do, what did you build it with, and what was the result?",
     "What genuinely interests you, inside or outside of work?",
     "When you have to choose, what do you put first, and what does that say about your priorities?",
 ]

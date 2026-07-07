@@ -524,6 +524,16 @@ async def generate_email(
     projects_block = "\n".join(f"- {p}" for p in project_lines)
     exp = rp.get("experience") or []
     current_role = f"{exp[0].get('title','')} at {exp[0].get('company','')}" if exp else ""
+    # Every role, not just the most recent one, with a couple of concrete
+    # bullets each, so the email can reach for the experience that actually
+    # matches this job instead of always leading with the latest title.
+    experience_lines = []
+    for role in exp[:4]:
+        header = " at ".join(p for p in [role.get("title"), role.get("company")] if p)
+        bullets = "; ".join((role.get("bullets") or [])[:2])
+        if header:
+            experience_lines.append(header + (f" — {bullets}" if bullets else ""))
+    experience_block = "\n".join(f"- {e}" for e in experience_lines)
     edu = (rp.get("education") or [{}])[0]
     edu_parts = [p for p in [edu.get("degree"), edu.get("field")] if p]
     edu_line = " in ".join(str(p) for p in edu_parts)
@@ -563,6 +573,19 @@ by a blank line. This is the layout of a normal, warm, professional application 
    reconstructed, and never invent or infer a link from anywhere else. If a link below says none
    on file, leave that entire signature line out completely rather than guessing one
 
+What makes an email high impact, hold every sentence to this bar:
+- Lead with substance. The first real sentence should already say something specific about this
+  candidate and this role, never a throat clearing line like "I am writing to apply."
+- Be concrete over adjectives. "I built a pipeline that cut report generation from six hours to
+  four minutes" beats "I am a hard working and passionate engineer." Reach for real numbers,
+  scale, tools, and outcomes from the facts given, never invent them.
+- Every claim is evidenced. Do not say they are strong at something; show the project or the role
+  where they did it.
+- Active voice, varied sentence length, no filler and no cliches ("fast paced environment", "team
+  player", "passion for", "wear many hats"). It should read like one sharp person wrote it, not a
+  template.
+- Warm and confident, never groveling and never arrogant. Respect the reader's time.
+
 Non negotiable rules:
 1. Read the required skills and responsibilities given below and mirror the ones that matter most,
    using the candidate's real matched skills and fit, never a skill they do not have
@@ -570,6 +593,8 @@ Non negotiable rules:
 3. Every sentence must connect a real fact about the candidate to something specific this job asks
    for, no generic sentences that could be sent to any company
 4. Sound like a real, thoughtful, confident professional wrote this personally for this one role
+5. Ground the projects and alignment paragraphs in the real experience and projects given below;
+   pick the ones that best match this job, do not just list the most recent
 {WRITING_STANDARDS}{_custom_instructions_block(custom_instructions)}
 Return JSON: {{"subject": "...", "body": "..."}}"""
 
@@ -580,6 +605,8 @@ Candidate: {name}
 Current role or education: {current_role or edu_line}
 Candidate's GitHub link: {github_url or "(none on file)"}
 Candidate's LinkedIn link: {linkedin_url or "(none on file)"}
+Candidate's work experience:
+{experience_block or "(none on file)"}
 Candidate's real projects:
 {projects_block or "(none on file)"}
 Role: {job_title} at {company}
@@ -657,6 +684,8 @@ Return ONLY this JSON structure:
   "knowledge_areas": ["a subject or field they clearly know well, from anything they said"],
   "interests": ["something they are genuinely interested in, inside or outside work"],
   "priorities": ["something they clearly put first when making decisions"],
+  "experience": ["one concrete work or internship experience they described, as 'role at place: what they did and the impact'"],
+  "projects": ["one real project they described, as 'name: what it does, what it was built with, and the outcome'"],
   "communication_style": "a short description of how they naturally express themselves"
 }}
 {WRITING_STANDARDS}"""
@@ -669,6 +698,7 @@ Return ONLY this JSON structure:
         "identity": "", "values": [], "strengths": [], "motivations": [],
         "work_style": [], "achievements": [], "goals": [],
         "knowledge_areas": [], "interests": [], "priorities": [],
+        "experience": [], "projects": [],
         "communication_style": "",
     }
 
@@ -704,6 +734,8 @@ def merge_knowledge_graph(old: Optional[Dict], new: Dict) -> Dict:
         "knowledge_areas": _merge_list("knowledge_areas"),
         "interests": _merge_list("interests"),
         "priorities": _merge_list("priorities"),
+        "experience": _merge_list("experience"),
+        "projects": _merge_list("projects"),
         "communication_style": new.get("communication_style") or old.get("communication_style") or "",
     }
 
@@ -730,6 +762,10 @@ def _knowledge_graph_context(knowledge_graph: Optional[Dict]) -> str:
         lines.append(f"What they are working toward: {', '.join(g['goals'][:3])}")
     if g.get("knowledge_areas"):
         lines.append(f"What they know deeply: {', '.join(g['knowledge_areas'][:5])}")
+    if g.get("experience"):
+        lines.append("Work experience they described: " + "; ".join(g["experience"][:4]))
+    if g.get("projects"):
+        lines.append("Projects they described: " + "; ".join(g["projects"][:4]))
     if g.get("interests"):
         lines.append(f"What genuinely interests them: {', '.join(g['interests'][:5])}")
     if g.get("priorities"):

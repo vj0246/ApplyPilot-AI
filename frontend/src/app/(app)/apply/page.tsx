@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import {
   Zap, FileText, Briefcase, Loader2, MessageSquare,
-  Sparkles, Copy, Link2, ExternalLink, AlertTriangle, ShieldCheck, Send, Pencil, Mail,
+  Sparkles, Copy, Link2, ExternalLink, AlertTriangle, ShieldCheck, Send, Pencil, Mail, Check,
 } from "lucide-react";
 import { resumeApi, jobApi, appApi, autofillApi, emailApi, profileApi } from "@/lib/api";
 import { Card, Badge, Textarea } from "@/components/ui";
@@ -160,10 +160,19 @@ function ApplyPageInner() {
     onSuccess: () => {
       setEditedAnswers({});
       qc.invalidateQueries({ queryKey: ["autofill", runId] });
-      toast.success("Answers updated, the pre-filled link now carries your edits, and they were saved to your memory for next time");
     },
     onError: (err: any) => toast.error(err.response?.data?.detail || "Could not save your edits"),
   });
+
+  // Autosave form answer edits: after a short pause in typing, the changed
+  // answers are saved, the pre-filled link is rebuilt, and each correction
+  // is remembered for future forms — no explicit save click.
+  useEffect(() => {
+    if (!runId || dirtyCount === 0 || saveAnswersMut.isPending) return;
+    const t = setTimeout(() => saveAnswersMut.mutate(), 1200);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editedAnswers]);
 
   // ── Application email ─────────────────────────────────────────────
   // A job description can be pasted straight into this flow, or an
@@ -201,11 +210,32 @@ function ApplyPageInner() {
 
   const saveEditMut = useMutation({
     mutationFn: () => emailApi.update(emailDraftId!, { subject: subjectValue, body: bodyValue }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["email", emailDraftId] }); toast.success("Draft updated"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["email", emailDraftId] }); },
+    onError: (err: any) => toast.error(err.response?.data?.detail || "Could not save your edits"),
   });
 
+  const hasEmailEdits = editedSubject !== null || editedBody !== null;
+
+  // Autosave subject/body edits after a short pause, so nothing a person
+  // types into the draft is ever lost by forgetting to press save.
+  useEffect(() => {
+    if (!emailDraftId || emailDraft?.status === "sent") return;
+    if (editedSubject === null && editedBody === null) return;
+    if (saveEditMut.isPending) return;
+    const t = setTimeout(() => saveEditMut.mutate(), 900);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editedSubject, editedBody]);
+
   const sendEmailMut = useMutation({
-    mutationFn: () => emailApi.send(emailDraftId!),
+    mutationFn: async () => {
+      // Flush any edit the autosave debounce has not written yet, so the
+      // email that goes out always reflects the latest subject and body.
+      if (editedSubject !== null || editedBody !== null) {
+        await emailApi.update(emailDraftId!, { subject: subjectValue, body: bodyValue });
+      }
+      return emailApi.send(emailDraftId!);
+    },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["email", emailDraftId] }); toast.success("Email sent from your address"); },
     onError: (err: any) => toast.error(err.response?.data?.detail || "Could not send the email"),
   });
@@ -583,22 +613,18 @@ function ApplyPageInner() {
               <div className="space-y-2 pt-2 border-t border-gray-100">
                 <div className="flex items-center justify-between pt-3">
                   <p className="text-sm font-semibold text-gray-900">Review and edit the answers</p>
-                  {dirtyCount > 0 && (
-                    <button
-                      onClick={() => saveAnswersMut.mutate()}
-                      disabled={saveAnswersMut.isPending}
-                      className="btn-primary text-sm"
-                    >
-                      {saveAnswersMut.isPending
-                        ? <Loader2 className="w-4 h-4 animate-spin" />
-                        : <>Save {dirtyCount} edit{dirtyCount > 1 ? "s" : ""} & rebuild link</>}
-                    </button>
-                  )}
+                  <span className="text-xs text-gray-400 flex items-center gap-1">
+                    {saveAnswersMut.isPending
+                      ? <><Loader2 className="w-3 h-3 animate-spin" /> Saving…</>
+                      : dirtyCount > 0
+                        ? "Unsaved changes"
+                        : <><Check className="w-3 h-3 text-emerald-500" /> Saved</>}
+                  </span>
                 </div>
                 <p className="text-xs text-gray-500">
-                  Change anything below, then save. The pre-filled link above updates to carry your
-                  edits, and every correction is remembered, the next form that asks the same thing
-                  gets your answer, not a fresh guess.
+                  Change anything below and it saves on its own. The pre-filled link above updates to
+                  carry your edits, and every correction is remembered, the next form that asks the
+                  same thing gets your answer, not a fresh guess.
                 </p>
                 {result.fields.map((f: any, i: number) => {
                   // runs stored before answers became editable have no
@@ -807,14 +833,16 @@ function ApplyPageInner() {
 
               {emailDraft.status !== "sent" && (
                 <>
+                  <div className="flex justify-end">
+                    <span className="text-xs text-gray-400 flex items-center gap-1">
+                      {saveEditMut.isPending
+                        ? <><Loader2 className="w-3 h-3 animate-spin" /> Saving…</>
+                        : hasEmailEdits
+                          ? <><Check className="w-3 h-3 text-emerald-500" /> Saved automatically</>
+                          : null}
+                    </span>
+                  </div>
                   <div className="flex gap-2">
-                    <button
-                      onClick={() => saveEditMut.mutate()}
-                      disabled={saveEditMut.isPending || (editedSubject === null && editedBody === null)}
-                      className="btn-secondary"
-                    >
-                      Save edits
-                    </button>
                     {canServerSend ? (
                       <button
                         onClick={() => sendEmailMut.mutate()}

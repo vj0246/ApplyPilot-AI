@@ -75,8 +75,14 @@ class FormScrapeError(ValueError):
 # Playwright would happily fetch the attacker's host (cloud metadata,
 # internal services). So parse the URL, require https, and match the real
 # hostname exactly against an allowlist.
-_GOOGLE_FORM_HOSTS = {"docs.google.com"}
 _MICROSOFT_FORM_HOSTS = {"forms.office.com", "forms.microsoft.com", "forms.office365.com"}
+# forms.gle is Google's own official short link for a Form (the "copy link"
+# button on a published form hands one out, and it is what gets pasted into
+# a LinkedIn post or a job listing). It only ever redirects within Google to
+# a docs.google.com/forms/.../viewform page, and Playwright follows that
+# redirect inside the browser, so accepting the short host is safe and does
+# not reopen the SSRF hole a general "follow any redirect" would.
+_GOOGLE_SHORT_HOSTS = {"forms.gle"}
 
 
 def _url_host(url: str) -> str:
@@ -90,9 +96,12 @@ def _url_host(url: str) -> str:
 
 
 def is_google_form_url(url: str) -> bool:
-    if _url_host(url) not in _GOOGLE_FORM_HOSTS:
-        return False
-    return urlsplit(url).path.startswith("/forms/")
+    host = _url_host(url)
+    if host in _GOOGLE_SHORT_HOSTS:
+        return True
+    if host == "docs.google.com":
+        return urlsplit(url).path.startswith("/forms/")
+    return False
 
 
 def is_microsoft_form_url(url: str) -> bool:

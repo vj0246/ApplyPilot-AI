@@ -16,6 +16,8 @@ export interface KnowledgeGraph {
   knowledge_areas?: string[];
   interests?: string[];
   priorities?: string[];
+  experience?: string[];
+  projects?: string[];
   communication_style?: string;
 }
 
