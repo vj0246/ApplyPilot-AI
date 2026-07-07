@@ -563,141 +563,33 @@ function SettingsPageInner() {
                 <div className="flex gap-3">
                   <Mail className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
                   <div className="text-sm text-blue-900">
-                    <p className="font-medium mb-0.5">Send from your own Gmail address</p>
+                    <p className="font-medium mb-0.5">Sending already works, nothing to set up</p>
                     <p className="text-blue-700">
-                      Connect your Gmail with an app password below and every application email
-                      leaves from your real address, lands in the recruiter's inbox, and reads as
-                      genuinely from you. This takes about two minutes to set up once, and is the
-                      recommended way to send. Nothing is ever sent automatically, every email is
-                      drafted first and only goes out when you press send.
+                      {gmailOauthStatus?.default_sending_available
+                        ? "Every application email you send already goes out with no setup on your part. The recruiter's reply lands in your own inbox either way, since Reply To is always set to your real email."
+                        : "Connect an account below so sending works."}
+                      {" "}Connecting Gmail below is optional, and only changes one thing: the email
+                      leaves from your literal Gmail address instead of ApplyPilot's shared sender.
+                      Nothing is ever sent automatically, every email is drafted first and only goes
+                      out when you press send.
                     </p>
                   </div>
                 </div>
               </Card>
 
-              <Card className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h2 className="font-semibold text-gray-900">Connect your Gmail</h2>
-                  {profile?.email_account_configured && (
-                    <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Sends as {profile.sender_email}
-                    </span>
-                  )}
-                </div>
-
-                {/* The one-time setup guide. A Gmail app password is a
-                    16 character code that lets this app send through the
-                    user's own mailbox without ever seeing their real
-                    Google password. It requires 2 step verification to be
-                    on first — that is a Google requirement, not ours. */}
-                <div className="rounded-lg bg-gray-50 border border-gray-100 p-4 text-sm text-gray-600 space-y-1.5">
-                  <p className="font-medium text-gray-900">How to get your app password (about 2 minutes)</p>
-                  <ol className="list-decimal list-inside space-y-1">
-                    <li>
-                      Turn on 2 Step Verification for your Google account at{" "}
-                      <a href="https://myaccount.google.com/signinoptions/twosv" target="_blank" rel="noreferrer" className="text-indigo-600 underline">
-                        myaccount.google.com/signinoptions/twosv
-                      </a> (skip if it is already on).
-                    </li>
-                    <li>
-                      Open{" "}
-                      <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" className="text-indigo-600 underline">
-                        myaccount.google.com/apppasswords
-                      </a>, type a name like ApplyPilot, and click Create.
-                    </li>
-                    <li>Copy the 16 character password Google shows you.</li>
-                    <li>Paste it below with your Gmail address, and press Connect.</li>
-                  </ol>
-                  <p className="text-xs text-gray-400 pt-1">
-                    The app password is stored encrypted and is only ever used to send from your own
-                    mailbox. It is not your Google password, and you can revoke it any time from that
-                    same Google page.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="label">Your Gmail address</label>
-                  <input
-                    value={emailForm.sender_email}
-                    onChange={(e) => setEmailForm((f) => ({ ...f, sender_email: e.target.value, smtp_username: f.smtp_username || e.target.value }))}
-                    placeholder="you@gmail.com"
-                    className="input"
-                  />
-                </div>
-
-                <div>
-                  <label className="label">16 character app password</label>
-                  <input
-                    type="password"
-                    value={emailForm.smtp_password}
-                    onChange={(e) => setEmailForm((f) => ({ ...f, smtp_password: e.target.value }))}
-                    placeholder="The code from the Google app passwords page"
-                    className="input"
-                  />
-                </div>
-
-                {/* SMTP host/port default to Gmail and are hidden unless
-                    someone is using a non Gmail provider, so the common
-                    path stays down to two fields. */}
-                <details className="text-sm">
-                  <summary className="cursor-pointer text-gray-400 hover:text-gray-600">
-                    Using a different provider than Gmail? Set the server manually
-                  </summary>
-                  <div className="grid grid-cols-2 gap-4 pt-3">
-                    <div>
-                      <label className="label">SMTP server</label>
-                      <input
-                        value={emailForm.smtp_host}
-                        onChange={(e) => setEmailForm((f) => ({ ...f, smtp_host: e.target.value }))}
-                        placeholder="smtp.gmail.com"
-                        className="input"
-                      />
-                    </div>
-                    <div>
-                      <label className="label">Port</label>
-                      <input
-                        type="number"
-                        value={emailForm.smtp_port}
-                        onChange={(e) => setEmailForm((f) => ({ ...f, smtp_port: Number(e.target.value) }))}
-                        className="input"
-                      />
-                    </div>
-                  </div>
-                </details>
-
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => saveEmailMut.mutate()}
-                    disabled={saveEmailMut.isPending || !emailForm.sender_email || !emailForm.smtp_password}
-                    className="btn-primary"
-                  >
-                    {saveEmailMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Connect"}
-                  </button>
-                  {profile?.email_account_configured && (
-                    <button
-                      onClick={() => clearEmailMut.mutate()}
-                      disabled={clearEmailMut.isPending}
-                      className="btn-secondary text-red-600 border-red-200 hover:bg-red-50"
-                    >
-                      Disconnect
-                    </button>
-                  )}
-                </div>
-              </Card>
-
-              {/* Gmail one click OAuth stays available only when the
-                  server has Google credentials set and the account is on
-                  the test list — most deployments will not, so it sits
-                  below the app password path as a secondary option. */}
               {gmailOauthStatus?.available && (
                 <Card className="space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h2 className="font-semibold text-gray-900">Or connect Gmail in one click</h2>
+                      <h2 className="font-semibold text-gray-900">Connect Gmail</h2>
                       <p className="text-sm text-gray-500">
-                        No app password to generate. Only works for accounts added to this app's
-                        Google test list while its review is pending, everyone else sees an
-                        unverified app warning — the app password path above works for everyone.
+                        The most reliable way to send: one click, no app password to generate or
+                        paste, and it is used automatically whenever it is connected.
+                      </p>
+                      <p className="text-xs text-amber-600 mt-1">
+                        This app's Google review is still pending, so only accounts added as a
+                        tester can complete this — everyone else sees an unverified app warning.
+                        Not needed either way, sending already works without it.
                       </p>
                     </div>
                     {profile?.gmail_connected && (
@@ -746,7 +638,7 @@ function SettingsPageInner() {
                     <button
                       onClick={() => connectGmailMut.mutate()}
                       disabled={connectGmailMut.isPending}
-                      className="btn-secondary"
+                      className="btn-primary"
                     >
                       {connectGmailMut.isPending
                         ? <Loader2 className="w-4 h-4 animate-spin" />
@@ -755,6 +647,94 @@ function SettingsPageInner() {
                   )}
                 </Card>
               )}
+
+              <Card className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="font-semibold text-gray-900">Advanced: send with an app password instead</h2>
+                  {profile?.email_account_configured && (
+                    <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Connected as {profile.sender_email}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400">
+                  Not needed for normal use, sending already works without this. Only used when
+                  Gmail above is not connected, in place of the automatic default sender. Only
+                  works if this backend is self-hosted or on a host that allows outbound SMTP —
+                  never works on the hosted version at applypilot.
+                </p>
+
+                <div>
+                  <label className="label">Your email address</label>
+                  <input
+                    value={emailForm.sender_email}
+                    onChange={(e) => setEmailForm((f) => ({ ...f, sender_email: e.target.value }))}
+                    placeholder="you@gmail.com"
+                    className="input"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="label">SMTP server</label>
+                    <input
+                      value={emailForm.smtp_host}
+                      onChange={(e) => setEmailForm((f) => ({ ...f, smtp_host: e.target.value }))}
+                      placeholder="smtp.gmail.com"
+                      className="input"
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Port</label>
+                    <input
+                      type="number"
+                      value={emailForm.smtp_port}
+                      onChange={(e) => setEmailForm((f) => ({ ...f, smtp_port: Number(e.target.value) }))}
+                      className="input"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="label">Username</label>
+                  <input
+                    value={emailForm.smtp_username}
+                    onChange={(e) => setEmailForm((f) => ({ ...f, smtp_username: e.target.value }))}
+                    placeholder="Usually the same as your email address"
+                    className="input"
+                  />
+                </div>
+
+                <div>
+                  <label className="label">App password</label>
+                  <input
+                    type="password"
+                    value={emailForm.smtp_password}
+                    onChange={(e) => setEmailForm((f) => ({ ...f, smtp_password: e.target.value }))}
+                    placeholder="Stored only in encrypted form"
+                    className="input"
+                  />
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => saveEmailMut.mutate()}
+                    disabled={saveEmailMut.isPending || !emailForm.sender_email || !emailForm.smtp_password}
+                    className="btn-primary"
+                  >
+                    {saveEmailMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Connect account"}
+                  </button>
+                  {profile?.email_account_configured && (
+                    <button
+                      onClick={() => clearEmailMut.mutate()}
+                      disabled={clearEmailMut.isPending}
+                      className="btn-secondary text-red-600 border-red-200 hover:bg-red-50"
+                    >
+                      Disconnect
+                    </button>
+                  )}
+                </div>
+              </Card>
             </div>
           )}
         </div>
