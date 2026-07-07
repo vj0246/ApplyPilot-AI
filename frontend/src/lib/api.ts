@@ -97,6 +97,15 @@ export const appApi = {
   delete: (id: string) => api.delete(`/applications/${id}`),
 };
 
+// ── Quick Apply chat ─────────────────────────────────────────────────
+// One paste does both: given a message with a form link and/or a
+// recipient email, it starts the form fill and/or drafts the email and
+// returns their ids for the review cards.
+export const applyApi = {
+  chat: (d: { message: string; resume_id: string }) =>
+    api.post("/apply/chat", d, { timeout: 90_000 }),
+};
+
 // ── Form Autofill (Google Forms and Microsoft Forms) ────────────────
 // Fills the real form, stops before submit — you review and click
 // submit yourself inside the actual form tab.

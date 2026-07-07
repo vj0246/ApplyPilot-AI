@@ -26,7 +26,11 @@ backend/
   app/models.py              User, Profile, Resume, Job, Application,
                              AutofillRun, EmailSend
   app/routers/               auth, profile, resumes, jobs, applications,
-                             autofill, email
+                             autofill, email, apply_chat (one-paste
+                             "Quick Apply": parses a message for a form
+                             link and a recipient email, then fills the
+                             form and/or drafts the email, reusing the
+                             autofill and email-draft paths)
   app/services/
     ai_service.py            ALL AI calls; every function has a regex fallback
     autofill_service.py      form scraping/filling + pre-filled link building

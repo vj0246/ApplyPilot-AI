@@ -10,7 +10,7 @@ from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
 from app.core.ratelimit import limiter
-from app.routers import auth, profile, resumes, jobs, applications, autofill, email
+from app.routers import auth, profile, resumes, jobs, applications, autofill, email, apply_chat
 
 # Cap request bodies. The only large legitimate body is a resume upload, so
 # allow the file limit plus a couple MB of multipart overhead and reject
@@ -96,6 +96,7 @@ app.include_router(jobs.router,         prefix="/api/v1")
 app.include_router(applications.router, prefix="/api/v1")
 app.include_router(autofill.router,     prefix="/api/v1")
 app.include_router(email.router,        prefix="/api/v1")
+app.include_router(apply_chat.router,   prefix="/api/v1")
 
 # ── Health ────────────────────────────────────────────────────
 @app.get("/health", include_in_schema=False)

@@ -5,14 +5,14 @@ import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import {
   Zap, FileText, Briefcase, Loader2, MessageSquare,
-  Sparkles, Copy, Link2, ExternalLink, AlertTriangle, ShieldCheck, Send, Pencil, Mail, Check,
+  Sparkles, Copy, Link2, ExternalLink, AlertTriangle, ShieldCheck, Send, Pencil, Mail, Check, Bot, ArrowRight,
 } from "lucide-react";
-import { resumeApi, jobApi, appApi, autofillApi, emailApi, profileApi } from "@/lib/api";
+import { resumeApi, jobApi, appApi, autofillApi, emailApi, profileApi, applyApi } from "@/lib/api";
 import { Card, Badge, Textarea } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
-type ApplyTab = "generate" | "formfill" | "googleform" | "email";
-const APPLY_TABS: ApplyTab[] = ["generate", "formfill", "googleform", "email"];
+type ApplyTab = "chat" | "generate" | "formfill" | "googleform" | "email";
+const APPLY_TABS: ApplyTab[] = ["chat", "generate", "formfill", "googleform", "email"];
 
 export default function ApplyPage() {
   // useSearchParams needs a Suspense boundary to prerender, so the page
@@ -35,7 +35,7 @@ function ApplyPageInner() {
   const searchParams = useSearchParams();
   const urlTab = searchParams.get("tab");
   const [tab, setTabState] = useState<ApplyTab>(
-    APPLY_TABS.includes(urlTab as ApplyTab) ? (urlTab as ApplyTab) : "googleform"
+    APPLY_TABS.includes(urlTab as ApplyTab) ? (urlTab as ApplyTab) : "chat"
   );
   useEffect(() => {
     if (APPLY_TABS.includes(urlTab as ApplyTab)) setTabState(urlTab as ApplyTab);
@@ -270,6 +270,34 @@ function ApplyPageInner() {
     onError: () => toast.error("Could not download the resume to attach"),
   });
 
+  // ── Quick Apply chat ──────────────────────────────────────────────
+  // One message can carry a job description, a form link, and a recipient
+  // email. The backend does whatever applies (fill the form, draft the
+  // email, or both) and hands back their ids, which we drop into the same
+  // runId / emailDraftId state the dedicated tabs use, so the person
+  // reviews each in the tab that already knows how to render it.
+  type ChatMsg = { role: "user" | "assistant"; text: string; emailDraftId?: string | null; runId?: string | null };
+  const [chatInput, setChatInput] = useState("");
+  const [chatMessages, setChatMessages] = useState<ChatMsg[]>([]);
+
+  const chatMut = useMutation({
+    mutationFn: () => applyApi.chat({ message: chatInput.trim(), resume_id: emailResumeId || gfResumeId || resumeId }),
+    onSuccess: ({ data }) => {
+      if (data.email_draft_id) { setEmailDraftId(data.email_draft_id); setEditedSubject(null); setEditedBody(null); }
+      if (data.autofill_run_id) { setRunId(data.autofill_run_id); setEditedAnswers({}); }
+      setChatMessages(m => [...m, { role: "assistant", text: data.reply, emailDraftId: data.email_draft_id, runId: data.autofill_run_id }]);
+      setChatInput("");
+    },
+    onError: (err: any) => toast.error(err.response?.data?.detail || "Could not process that message"),
+  });
+
+  const sendChat = () => {
+    const msg = chatInput.trim();
+    if (!msg || chatMut.isPending) return;
+    setChatMessages(m => [...m, { role: "user", text: msg }]);
+    chatMut.mutate();
+  };
+
   const noResume = readyResumes.length === 0;
   const noJob = readyJobs.length === 0;
 
@@ -285,6 +313,9 @@ function ApplyPageInner() {
 
       {/* Tabs — the two main actions first, the extra tools after */}
       <div className="flex gap-2 mb-6 flex-wrap">
+        <TabBtn active={tab === "chat"} onClick={() => setTab("chat")} icon={Bot}>
+          Quick Apply
+        </TabBtn>
         <TabBtn active={tab === "googleform"} onClick={() => setTab("googleform")} icon={Link2}>
           Fill a Form
         </TabBtn>
@@ -298,6 +329,98 @@ function ApplyPageInner() {
           Answer Any Question
         </TabBtn>
       </div>
+
+      {tab === "chat" && (
+        <div className="space-y-5">
+          <Card className="bg-blue-50 border-blue-100">
+            <div className="flex gap-3">
+              <Bot className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+              <div className="text-sm text-blue-900">
+                <p className="font-medium mb-0.5">Paste it all, I do both</p>
+                <p className="text-blue-700">
+                  Drop the job description here. Add a Google or Microsoft Form link and I fill the
+                  form. Add a recipient email and I draft the application email. Include both and I
+                  do both. Nothing is submitted or sent until you review it.
+                </p>
+              </div>
+            </div>
+          </Card>
+
+          {noResume && (
+            <Card className="bg-yellow-50 border-yellow-100">
+              <p className="text-sm text-yellow-800">
+                Upload a resume first, everything is written from it.{" "}
+                <a href="/resume" className="underline font-medium">Upload resume</a>
+              </p>
+            </Card>
+          )}
+
+          {chatMessages.length > 0 && (
+            <div className="space-y-3">
+              {chatMessages.map((m, i) => (
+                <div key={i} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
+                  <div className={cn(
+                    "max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap",
+                    m.role === "user" ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-800"
+                  )}>
+                    <p>{m.text}</p>
+                    {(m.emailDraftId || m.runId) && (
+                      <div className="flex gap-2 mt-2">
+                        {m.emailDraftId && (
+                          <button
+                            onClick={() => setTab("email")}
+                            className="text-xs font-medium bg-white text-indigo-700 rounded-lg px-2.5 py-1 flex items-center gap-1 hover:bg-indigo-50"
+                          >
+                            Review the email <ArrowRight className="w-3 h-3" />
+                          </button>
+                        )}
+                        {m.runId && (
+                          <button
+                            onClick={() => setTab("googleform")}
+                            className="text-xs font-medium bg-white text-indigo-700 rounded-lg px-2.5 py-1 flex items-center gap-1 hover:bg-indigo-50"
+                          >
+                            Review the form <ArrowRight className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {chatMut.isPending && (
+                <div className="flex justify-start">
+                  <div className="bg-gray-100 text-gray-500 rounded-2xl px-4 py-2.5 text-sm flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" /> Working on it…
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <Card className="space-y-3">
+            <textarea
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              rows={5}
+              placeholder={"Paste the job description here.\n\nAdd a form link (forms.gle/... or forms.office.com/...) to fill the form, and a recipient email (hiring@company.com) to draft the application email. Both is fine."}
+              onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") sendChat(); }}
+              className="input resize-none"
+            />
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-gray-400">Press Ctrl or Cmd + Enter to send</p>
+              <button
+                onClick={sendChat}
+                disabled={!chatInput.trim() || noResume || chatMut.isPending}
+                className="btn-primary"
+              >
+                {chatMut.isPending
+                  ? <><Loader2 className="w-4 h-4 animate-spin" /> Working…</>
+                  : <><Send className="w-4 h-4" /> Apply</>}
+              </button>
+            </div>
+          </Card>
+        </div>
+      )}
 
       {tab === "generate" ? (
         <>
@@ -858,7 +981,7 @@ function ApplyPageInner() {
                     ) : (
                       <button
                         onClick={() => openMailAppMut.mutate()}
-                        disabled={openMailAppMut.isPending || !recipientEmail.trim()}
+                        disabled={openMailAppMut.isPending || !(recipientEmail.trim() || emailDraft?.recipient_email)}
                         className="btn-primary flex-1 justify-center"
                       >
                         {openMailAppMut.isPending ? (
@@ -872,7 +995,7 @@ function ApplyPageInner() {
                   {canServerSend && (
                     <button
                       onClick={() => openMailAppMut.mutate()}
-                      disabled={openMailAppMut.isPending || !recipientEmail.trim()}
+                      disabled={openMailAppMut.isPending || !(recipientEmail.trim() || emailDraft?.recipient_email)}
                       className="text-xs text-gray-400 hover:text-gray-600 w-full text-center flex items-center justify-center gap-1"
                     >
                       {openMailAppMut.isPending ? (
