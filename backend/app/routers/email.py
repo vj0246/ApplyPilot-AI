@@ -25,7 +25,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, EmailStr, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +33,7 @@ from app.core import crypto
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.auth import decode_token
+from app.core.http import parse_uuid
 from app.models import EmailSend, Job, Profile, Resume, User
 from app.routers.auth import get_current_user
 from app.services import ai_service, email_service, gmail_service
@@ -43,7 +44,10 @@ log = logging.getLogger(__name__)
 
 class EmailDraftIn(BaseModel):
     resume_id: str
-    recipient_email: str
+    # EmailStr rejects a value with newlines or a malformed address, which
+    # closes header injection through the recipient (it lands in the MIME
+    # To header and the SMTP envelope).
+    recipient_email: EmailStr
     job_id: Optional[str] = None
     job_description: Optional[str] = None
     extra_context: str = ""
@@ -188,7 +192,7 @@ async def create_draft(
 ):
     saved_job_id = None
     if body.job_id:
-        job = await db.get(Job, uuid.UUID(body.job_id))
+        job = await db.get(Job, parse_uuid(body.job_id, "Job"))
         if not job or job.user_id != u.id:
             raise HTTPException(404, "Job not found")
         job_parsed = job.parsed_data or {}
@@ -198,7 +202,7 @@ async def create_draft(
         # never written to the jobs table
         job_parsed = await ai_service.parse_job(body.job_description or "")
 
-    resume = await db.get(Resume, uuid.UUID(body.resume_id))
+    resume = await db.get(Resume, parse_uuid(body.resume_id, "Resume"))
     if not resume or resume.user_id != u.id:
         raise HTTPException(404, "Resume not found")
 

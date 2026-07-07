@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.auth import create_token, hash_password, verify_password, decode_token
+from app.core.ratelimit import limiter
 from app.models import Profile, User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -36,7 +37,13 @@ async def get_current_user(
     payload = decode_token(h[7:])
     if not payload:
         raise HTTPException(401, "Invalid or expired token")
-    user = await db.get(User, uuid.UUID(payload["sub"]))
+    # A token whose sub is missing or not a UUID must read as unauthenticated,
+    # not crash uuid.UUID() into an unhandled 500.
+    try:
+        user_id = uuid.UUID(str(payload.get("sub")))
+    except (ValueError, TypeError):
+        raise HTTPException(401, "Invalid token")
+    user = await db.get(User, user_id)
     if not user or not user.is_active:
         raise HTTPException(401, "User not found or inactive")
     return user
@@ -53,7 +60,8 @@ def _user_out(u: User) -> dict:
 
 # ── Routes ────────────────────────────────────────────────────
 @router.post("/register", status_code=201)
-async def register(body: RegisterIn, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/hour")
+async def register(request: Request, body: RegisterIn, db: AsyncSession = Depends(get_db)):
     existing = await db.execute(select(User).where(User.email == body.email.lower()))
     if existing.scalar_one_or_none():
         raise HTTPException(409, "An account with this email already exists")
@@ -74,7 +82,8 @@ async def register(body: RegisterIn, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login")
-async def login(body: LoginIn, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/minute")
+async def login(request: Request, body: LoginIn, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == body.email.lower()))
     user = result.scalar_one_or_none()
     if not user or not user.password_hash or not verify_password(body.password, user.password_hash):

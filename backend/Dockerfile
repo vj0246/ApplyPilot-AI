@@ -14,10 +14,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Playwright needs its own browser binary + a pile of OS-level libs
 # (font rendering, GTK, audio stubs, etc) that aren't in the slim image
-# by default. `playwright install --with-deps` handles both in one go.
-# This is the single biggest reason the image is heavier than before —
-# worth it, it's the only way to actually drive a real Chromium instance
-# to fill out a Google Form.
+# by default. `playwright install --with-deps` handles both in one go
+# (the --with-deps apt step needs root, so it runs before the USER switch
+# below). Browsers go to a shared path, not /root, so the non-root runtime
+# user can still find them.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN playwright install --with-deps chromium
 
 COPY . .
@@ -27,6 +28,13 @@ RUN mkdir -p /app/uploads
 ENV PYTHONPATH=/app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+
+# Drop root: run as an unprivileged user so a process compromise cannot
+# trivially write the image or escalate. It needs read of the browsers and
+# write of the uploads cache directory.
+RUN useradd -m -u 10001 appuser \
+    && chown -R appuser:appuser /app /ms-playwright
+USER appuser
 
 EXPOSE 8000
 

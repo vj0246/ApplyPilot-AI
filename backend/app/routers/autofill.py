@@ -28,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, AsyncSessionLocal
+from app.core.http import parse_uuid
 from app.models import AutofillRun, Job, Profile, Resume, User
 from app.routers.auth import get_current_user
 from app.services import autofill_service
@@ -74,7 +75,7 @@ async def start_autofill(
             "(expected a docs.google.com/forms/... or forms.office.com/... URL).",
         )
 
-    resume = await db.get(Resume, uuid.UUID(body.resume_id))
+    resume = await db.get(Resume, parse_uuid(body.resume_id, "Resume"))
     if not resume or resume.user_id != u.id:
         raise HTTPException(404, "Resume not found")
     if resume.status != "ready":
@@ -82,7 +83,7 @@ async def start_autofill(
 
     job_id = None
     if body.job_id:
-        job = await db.get(Job, uuid.UUID(body.job_id))
+        job = await db.get(Job, parse_uuid(body.job_id, "Job"))
         if job and job.user_id == u.id:
             job_id = job.id
 
