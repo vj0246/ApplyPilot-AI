@@ -253,94 +253,114 @@ function OnboardingPageInner() {
         {step === 2 && (
           <Card className="space-y-5">
             <div>
-              <h2 className="font-semibold text-gray-900 flex items-center gap-2"><Mail className="w-4 h-4" /> Connect your email</h2>
+              <h2 className="font-semibold text-gray-900 flex items-center gap-2"><Mail className="w-4 h-4" /> Sending is ready</h2>
               <p className="text-sm text-gray-500 mt-1">
-                {gmailOauthStatus?.default_sending_available
-                  ? "Fully optional. Sending already works with no setup at all, replies still reach your own inbox. Connect Gmail only if you want the email to leave from your literal address instead."
-                  : "Optional, needed only if you want this tool to send the application email from your own address."}
+                Nothing to set up. When you send an application, open it in your own mail app to
+                send from your real address in one click, or send it instantly and it still
+                reaches the recipient with replies routed back to you.
               </p>
             </div>
 
-            {emailConnected ? (
+            {emailConnected && (
               <p className="text-sm text-emerald-700 bg-emerald-50 p-3 rounded-lg flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4" />
                 {gmailConnected ? `Connected as ${profile?.gmail_address}` : `Connected as ${emailForm.sender_email}`}
               </p>
-            ) : (
-              <>
-                {gmailOauthStatus?.available && (
+            )}
+
+            {/* Advanced connection options are hidden by default — Gmail
+                Connect only works for accounts on this app's Google test
+                user list (Google blocks everyone else with an unverified
+                app warning), and the app password path never works on our
+                hosted backend since Render blocks outbound SMTP. Neither
+                is something a random visitor should be steered toward. */}
+            {!emailConnected && (
+              <details className="text-sm">
+                <summary className="cursor-pointer text-gray-500 hover:text-gray-700">
+                  Advanced: connect your own address instead
+                </summary>
+                <div className="space-y-4 pt-4">
+                  {gmailOauthStatus?.available && (
+                    <>
+                      <button
+                        onClick={() => connectGmailMut.mutate()}
+                        disabled={connectGmailMut.isPending}
+                        className="btn-secondary w-full justify-center py-2.5"
+                      >
+                        {connectGmailMut.isPending
+                          ? <Loader2 className="w-4 h-4 animate-spin" />
+                          : <>Connect Gmail <ExternalLink className="w-3.5 h-3.5" /></>}
+                      </button>
+                      <p className="text-xs text-gray-400">
+                        Only works if this account has been added as a tester — Google shows
+                        everyone else an unverified app warning. Most people should skip this.
+                      </p>
+                      <div className="flex items-center gap-3 text-xs text-gray-400">
+                        <div className="flex-1 h-px bg-gray-200" /> or <div className="flex-1 h-px bg-gray-200" />
+                      </div>
+                    </>
+                  )}
+
+                  <div>
+                    <label className="label">Your email address</label>
+                    <input
+                      value={emailForm.sender_email}
+                      onChange={(e) => setEmailForm((f) => ({ ...f, sender_email: e.target.value }))}
+                      placeholder="you@gmail.com"
+                      className="input"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="label">SMTP server</label>
+                      <input
+                        value={emailForm.smtp_host}
+                        onChange={(e) => setEmailForm((f) => ({ ...f, smtp_host: e.target.value }))}
+                        className="input"
+                      />
+                    </div>
+                    <div>
+                      <label className="label">Port</label>
+                      <input
+                        type="number"
+                        value={emailForm.smtp_port}
+                        onChange={(e) => setEmailForm((f) => ({ ...f, smtp_port: Number(e.target.value) }))}
+                        className="input"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="label">Username</label>
+                    <input
+                      value={emailForm.smtp_username}
+                      onChange={(e) => setEmailForm((f) => ({ ...f, smtp_username: e.target.value }))}
+                      placeholder="Usually the same as your email address"
+                      className="input"
+                    />
+                  </div>
+                  <div>
+                    <label className="label">App password</label>
+                    <input
+                      type="password"
+                      value={emailForm.smtp_password}
+                      onChange={(e) => setEmailForm((f) => ({ ...f, smtp_password: e.target.value }))}
+                      placeholder="Stored only in encrypted form"
+                      className="input"
+                    />
+                  </div>
                   <button
-                    onClick={() => connectGmailMut.mutate()}
-                    disabled={connectGmailMut.isPending}
-                    className="btn-primary w-full justify-center py-2.5"
+                    onClick={() => saveEmailMut.mutate()}
+                    disabled={saveEmailMut.isPending || !emailForm.sender_email || !emailForm.smtp_password}
+                    className="btn-secondary w-full justify-center py-2.5"
                   >
-                    {connectGmailMut.isPending
-                      ? <Loader2 className="w-4 h-4 animate-spin" />
-                      : <>Connect Gmail <ExternalLink className="w-3.5 h-3.5" /></>}
+                    {saveEmailMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Connect with app password"}
                   </button>
-                )}
-
-                {gmailOauthStatus?.available && (
-                  <div className="flex items-center gap-3 text-xs text-gray-400">
-                    <div className="flex-1 h-px bg-gray-200" /> or use an app password <div className="flex-1 h-px bg-gray-200" />
-                  </div>
-                )}
-
-                <div>
-                  <label className="label">Your email address</label>
-                  <input
-                    value={emailForm.sender_email}
-                    onChange={(e) => setEmailForm((f) => ({ ...f, sender_email: e.target.value }))}
-                    placeholder="you@gmail.com"
-                    className="input"
-                  />
+                  <p className="text-xs text-gray-400">
+                    Only works when this backend is self-hosted locally or on a host that allows
+                    outbound SMTP — never works on the hosted version at applypilot.
+                  </p>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="label">SMTP server</label>
-                    <input
-                      value={emailForm.smtp_host}
-                      onChange={(e) => setEmailForm((f) => ({ ...f, smtp_host: e.target.value }))}
-                      className="input"
-                    />
-                  </div>
-                  <div>
-                    <label className="label">Port</label>
-                    <input
-                      type="number"
-                      value={emailForm.smtp_port}
-                      onChange={(e) => setEmailForm((f) => ({ ...f, smtp_port: Number(e.target.value) }))}
-                      className="input"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="label">Username</label>
-                  <input
-                    value={emailForm.smtp_username}
-                    onChange={(e) => setEmailForm((f) => ({ ...f, smtp_username: e.target.value }))}
-                    placeholder="Usually the same as your email address"
-                    className="input"
-                  />
-                </div>
-                <div>
-                  <label className="label">App password</label>
-                  <input
-                    type="password"
-                    value={emailForm.smtp_password}
-                    onChange={(e) => setEmailForm((f) => ({ ...f, smtp_password: e.target.value }))}
-                    placeholder="Stored only in encrypted form"
-                    className="input"
-                  />
-                </div>
-                <button
-                  onClick={() => saveEmailMut.mutate()}
-                  disabled={saveEmailMut.isPending || !emailForm.sender_email || !emailForm.smtp_password}
-                  className="btn-secondary w-full justify-center py-2.5"
-                >
-                  {saveEmailMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Connect with app password"}
-                </button>
-              </>
+              </details>
             )}
 
             <button
@@ -350,10 +370,8 @@ function OnboardingPageInner() {
             >
               {finishMut.isPending ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
-              ) : emailConnected ? (
-                "Finish, take me to the dashboard"
               ) : (
-                "Skip for now, take me to the dashboard"
+                "Finish, take me to the dashboard"
               )}
             </button>
           </Card>

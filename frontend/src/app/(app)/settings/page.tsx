@@ -586,6 +586,11 @@ function SettingsPageInner() {
                         The most reliable way to send: one click, no app password to generate or
                         paste, and it is used automatically whenever it is connected.
                       </p>
+                      <p className="text-xs text-amber-600 mt-1">
+                        This app's Google review is still pending, so only accounts added as a
+                        tester can complete this — everyone else sees an unverified app warning.
+                        Not needed either way, sending already works without it.
+                      </p>
                     </div>
                     {profile?.gmail_connected && (
                       <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full flex items-center gap-1 shrink-0">
@@ -654,7 +659,9 @@ function SettingsPageInner() {
                 </div>
                 <p className="text-xs text-gray-400">
                   Not needed for normal use, sending already works without this. Only used when
-                  Gmail above is not connected, in place of the automatic default sender.
+                  Gmail above is not connected, in place of the automatic default sender. Only
+                  works if this backend is self-hosted or on a host that allows outbound SMTP —
+                  never works on the hosted version at applypilot.
                 </p>
 
                 <div>
