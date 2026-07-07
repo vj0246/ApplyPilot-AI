@@ -69,6 +69,7 @@ export const resumeApi = {
   },
   list: () => api.get("/resumes/"),
   get: (id: string) => api.get(`/resumes/${id}`),
+  download: (id: string) => api.get(`/resumes/${id}/download`, { responseType: "blob" }),
   patch: (id: string, d: Record<string, unknown>) => api.patch(`/resumes/${id}`, d),
   delete: (id: string) => api.delete(`/resumes/${id}`),
 };

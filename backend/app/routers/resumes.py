@@ -1,7 +1,7 @@
 import uuid
 import logging
 from pathlib import Path
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, Response
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
@@ -129,6 +129,28 @@ async def get_resume(
     if not r or r.user_id != u.id:
         raise HTTPException(404, "Resume not found")
     return _out(r)
+
+
+@router.get("/{rid}/download")
+async def download_resume(
+    rid: uuid.UUID,
+    u: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    r = await db.get(Resume, rid)
+    if not r or r.user_id != u.id:
+        raise HTTPException(404, "Resume not found")
+    data = r.file_data
+    if not data:
+        try:
+            data = Path(r.file_path).read_bytes()
+        except Exception:
+            raise HTTPException(410, "This resume's file is no longer available, re-upload it.")
+    return Response(
+        content=data,
+        media_type=r.mime_type or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{r.filename}"'},
+    )
 
 
 @router.patch("/{rid}")

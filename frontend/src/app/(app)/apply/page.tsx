@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import {
   Zap, FileText, Briefcase, Loader2, MessageSquare,
-  Sparkles, Copy, Link2, ExternalLink, AlertTriangle, ShieldCheck, Send, Pencil,
+  Sparkles, Copy, Link2, ExternalLink, AlertTriangle, ShieldCheck, Send, Pencil, Mail,
 } from "lucide-react";
 import { resumeApi, jobApi, appApi, autofillApi, emailApi } from "@/lib/api";
 import { Card, Badge, Textarea } from "@/components/ui";
@@ -200,6 +200,36 @@ function ApplyPageInner() {
     mutationFn: () => emailApi.send(emailDraftId!),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["email", emailDraftId] }); toast.success("Email sent from your address"); },
     onError: (err: any) => toast.error(err.response?.data?.detail || "Could not send the email"),
+  });
+
+  // Opens the applicant's own mail client with the draft pre-filled, so
+  // it genuinely sends from their real address with no server, no OAuth,
+  // no per-user setup — works for anyone regardless of email provider.
+  // Browsers block attaching a file to a mailto: link for security
+  // reasons, so the resume downloads at the same time for a one-click
+  // manual attach.
+  const openMailAppMut = useMutation({
+    mutationFn: async () => {
+      const rid = emailResumeId || resumeId;
+      const resume = readyResumes.find((r: any) => r.id === rid);
+      if (rid) {
+        const res = await resumeApi.download(rid);
+        const url = URL.createObjectURL(new Blob([res.data]));
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = resume?.filename || "resume";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
+      const to = emailDraft?.recipient_email || recipientEmail.trim();
+      const body = bodyValue.replace(/\n/g, "\r\n");
+      window.location.href =
+        `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subjectValue)}&body=${encodeURIComponent(body)}`;
+    },
+    onSuccess: () => toast.success("Resume downloaded, your mail app is opening — attach it, then send"),
+    onError: () => toast.error("Could not download the resume to attach"),
   });
 
   const noResume = readyResumes.length === 0;
@@ -648,9 +678,9 @@ function ApplyPageInner() {
                 <p className="text-blue-700">
                   This writes an application email about the job description from your resume
                   and your knowledge graph. Nothing goes out until you review the draft below,
-                  edit it if you want, and press send. Sending works out of the box, no setup
-                  needed. Connect Gmail in settings if you want it to leave from your own literal
-                  address instead.
+                  edit it if you want, and press send. Open it in your own mail app to send from
+                  your real address with zero setup, or send instantly through ApplyPilot's
+                  server instead.
                 </p>
               </div>
             </div>
@@ -767,26 +797,46 @@ function ApplyPageInner() {
               )}
 
               {emailDraft.status !== "sent" && (
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => saveEditMut.mutate()}
-                    disabled={saveEditMut.isPending || (editedSubject === null && editedBody === null)}
-                    className="btn-secondary"
-                  >
-                    Save edits
-                  </button>
-                  <button
-                    onClick={() => sendEmailMut.mutate()}
-                    disabled={sendEmailMut.isPending}
-                    className="btn-primary flex-1 justify-center"
-                  >
-                    {sendEmailMut.isPending ? (
-                      <><Loader2 className="w-4 h-4 animate-spin" /> Sending...</>
-                    ) : (
-                      <><Send className="w-4 h-4" /> Send from my address</>
-                    )}
-                  </button>
-                </div>
+                <>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => saveEditMut.mutate()}
+                      disabled={saveEditMut.isPending || (editedSubject === null && editedBody === null)}
+                      className="btn-secondary"
+                    >
+                      Save edits
+                    </button>
+                    <button
+                      onClick={() => openMailAppMut.mutate()}
+                      disabled={openMailAppMut.isPending || !recipientEmail.trim()}
+                      className="btn-secondary flex-1 justify-center"
+                    >
+                      {openMailAppMut.isPending ? (
+                        <><Loader2 className="w-4 h-4 animate-spin" /> Preparing...</>
+                      ) : (
+                        <><Mail className="w-4 h-4" /> Open in my mail app</>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => sendEmailMut.mutate()}
+                      disabled={sendEmailMut.isPending}
+                      className="btn-primary flex-1 justify-center"
+                    >
+                      {sendEmailMut.isPending ? (
+                        <><Loader2 className="w-4 h-4 animate-spin" /> Sending...</>
+                      ) : (
+                        <><Send className="w-4 h-4" /> Send via ApplyPilot</>
+                      )}
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-400">
+                    "Open in my mail app" opens Gmail, Outlook, or whatever you use, pre-filled and
+                    ready, and sends from your real address — no setup, works for anyone. It
+                    downloads your resume at the same time; attach it before you hit send, mail
+                    apps block automatic attachments for security. "Send via ApplyPilot" sends
+                    instantly from our server instead, resume attached automatically.
+                  </p>
+                </>
               )}
 
               {emailDraft.status === "sent" && (
