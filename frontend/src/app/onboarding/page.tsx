@@ -137,7 +137,17 @@ function OnboardingPageInner() {
   // ── Finish ────────────────────────────────────────────────────────
   const finishMut = useMutation({
     mutationFn: () => profileApi.update({ onboarding_done: true }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["profile"] }); router.push("/dashboard"); },
+    onSuccess: ({ data }) => {
+      // Write the fresh profile into the cache synchronously BEFORE
+      // navigating. The (app) layout guard redirects back to onboarding
+      // whenever the cached profile still reads onboarding_done: false, so
+      // a plain invalidate (which refetches asynchronously) let the guard
+      // fire on the stale value and bounce the user straight back here —
+      // the "had to finish onboarding twice" loop. Seeding the cache with
+      // onboarding_done: true closes that race.
+      qc.setQueryData(["profile"], (old: any) => ({ ...(old || {}), ...(data || {}), onboarding_done: true }));
+      router.push("/dashboard");
+    },
   });
 
   return (
