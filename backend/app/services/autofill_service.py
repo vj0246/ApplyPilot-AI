@@ -67,12 +67,36 @@ class FormScrapeError(ValueError):
         self.screenshot_b64 = screenshot_b64
 
 
+# These checks gate a Playwright navigation to a user supplied URL, so they
+# are a server side request forgery boundary, not just input validation. A
+# substring test like ("docs.google.com/forms" in url) is bypassable —
+# https://169.254.169.254/docs.google.com/forms or
+# https://evil.com/?x=docs.google.com/forms both contain the substring, and
+# Playwright would happily fetch the attacker's host (cloud metadata,
+# internal services). So parse the URL, require https, and match the real
+# hostname exactly against an allowlist.
+_GOOGLE_FORM_HOSTS = {"docs.google.com"}
+_MICROSOFT_FORM_HOSTS = {"forms.office.com", "forms.microsoft.com", "forms.office365.com"}
+
+
+def _url_host(url: str) -> str:
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return ""
+    if parts.scheme != "https":
+        return ""
+    return (parts.hostname or "").lower()
+
+
 def is_google_form_url(url: str) -> bool:
-    return "docs.google.com/forms" in url
+    if _url_host(url) not in _GOOGLE_FORM_HOSTS:
+        return False
+    return urlsplit(url).path.startswith("/forms/")
 
 
 def is_microsoft_form_url(url: str) -> bool:
-    return "forms.office.com" in url or "forms.microsoft.com" in url or "forms.office365.com" in url
+    return _url_host(url) in _MICROSOFT_FORM_HOSTS
 
 
 def is_supported_form_url(url: str) -> bool:

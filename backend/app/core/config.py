@@ -1,5 +1,8 @@
 from functools import lru_cache
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_DEV_SECRET = "dev-secret-key-change-in-production-min-32-chars"
 
 
 class Settings(BaseSettings):
@@ -9,7 +12,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://applypilot:applypilot@localhost:5432/applypilot"
 
     # Auth
-    SECRET_KEY: str = "dev-secret-key-change-in-production-min-32-chars"
+    SECRET_KEY: str = _DEV_SECRET
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
 
@@ -60,6 +63,19 @@ class Settings(BaseSettings):
     # App
     ENVIRONMENT: str = "development"
     FRONTEND_URL: str = "http://localhost:3000"
+
+    @model_validator(mode="after")
+    def _guard_production_secrets(self):
+        # Fail fast at startup rather than run production on the shipped dev
+        # key. That key is public in this repo, so leaving it in place means
+        # anyone can forge a JWT for any user and decrypt every stored app
+        # password (crypto.py derives its Fernet key from SECRET_KEY).
+        if self.ENVIRONMENT == "production":
+            if self.SECRET_KEY == _DEV_SECRET or len(self.SECRET_KEY) < 32:
+                raise ValueError(
+                    "SECRET_KEY must be set to a strong random value (>= 32 chars) in production."
+                )
+        return self
 
 
 @lru_cache

@@ -17,14 +17,36 @@ async def lifespan(app: FastAPI):
     # Shutdown
 
 
+_IS_PROD = settings.ENVIRONMENT == "production"
+
 app = FastAPI(
     title="ApplyPilot API",
     description="AI-powered job application assistant",
     version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    # The interactive docs, ReDoc, and the OpenAPI schema enumerate every
+    # route and body shape — useful in development, a free map of the
+    # attack surface in production. Off when running as production.
+    docs_url=None if _IS_PROD else "/docs",
+    redoc_url=None if _IS_PROD else "/redoc",
+    openapi_url=None if _IS_PROD else "/openapi.json",
     lifespan=lifespan,
 )
+
+
+# ── Security headers ──────────────────────────────────────────
+@app.middleware("http")
+async def security_headers(request, call_next):
+    resp = await call_next(request)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    if _IS_PROD:
+        resp.headers.setdefault(
+            "Strict-Transport-Security", "max-age=63072000; includeSubDomains"
+        )
+    return resp
+
 
 # ── Middleware ────────────────────────────────────────────────
 app.add_middleware(GZipMiddleware, minimum_size=1000)

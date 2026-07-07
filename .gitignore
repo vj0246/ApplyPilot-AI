@@ -6,6 +6,9 @@ __pycache__/
 venv/
 dist/
 *.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Node
 node_modules/
@@ -14,10 +17,16 @@ out/
 npm-debug.log*
 yarn-error.log*
 
-# Environment
+# Environment / secrets — never commit any variant
 .env
+.env.*
+*.env
 .env.local
 .env.production
+*.pem
+*.key
+service-account*.json
+credentials*.json
 
 # Docker volumes
 postgres_data/
