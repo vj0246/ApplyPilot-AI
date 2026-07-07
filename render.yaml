@@ -17,50 +17,34 @@
 #   FRONTEND_URL   https://your-app.vercel.app  (exact origin, no trailing
 #                  slash — this is what CORS allows)
 #
-# Mail sending on Render must go through HTTPS, not raw SMTP — Render
-# blocks outbound SMTP ports (25, 587, 465) network wide on every plan,
-# so an app password will time out no matter what the code does. Two
-# HTTPS paths exist, and either alone is enough for sending to work:
+# Mail sending. There is no shared server side sender: every email leaves
+# from the sending user's own address. Two ways that happens:
 #
-#   RELAY_URL              The "send from the user's own Gmail" path.
-#   RELAY_SECRET           A user connects their address with a Gmail app
-#                          password; because Render blocks outbound SMTP,
-#                          the backend hands the finished message to the
-#                          relay service (see relay/, deployed on Fly.io
-#                          which does allow outbound SMTP) which sends it
-#                          from the user's own mailbox. RELAY_URL is the
-#                          relay's public https URL; RELAY_SECRET is a
-#                          long random value that must match the one set
-#                          on the relay, so only this backend can drive
-#                          it. This is now the recommended path: mail
-#                          from the user's real address lands in the
-#                          inbox and reads as genuinely from them.
+#   1. The user opens the draft in their own mail app (mailto), which
+#      needs nothing configured here at all — it is always available.
+#   2. The user connects their own Gmail for one click sending, either:
 #
-#   SENDGRID_API_KEY       Zero setup fallback for users who have not
-#   SENDGRID_FROM_EMAIL    connected their own address. Free SendGrid
-#                          account, one sender verified by clicking a
-#                          link (Single Sender Verification, no domain or
-#                          DNS). Sends from that shared sender with Reply
-#                          To set to the applicant, but with no domain
-#                          authentication it often lands in spam — which
-#                          is exactly why the RELAY path above is
-#                          preferred for anyone who sets it up.
-#
-#   GOOGLE_CLIENT_ID       Optional upgrade: lets a user connect their
-#   GOOGLE_CLIENT_SECRET   own Gmail so mail leaves from their literal
-#                          address instead of the shared SendGrid
-#                          sender. OAuth client from
-#                          console.cloud.google.com, type Web
-#                          application, with this redirect URI
-#                          registered exactly:
+#   GOOGLE_CLIENT_ID       Gmail OAuth — the user connects their Google
+#   GOOGLE_CLIENT_SECRET   account and mail leaves from their literal
+#                          address over the Gmail HTTPS API (Render blocks
+#                          raw SMTP, the API is not blocked). OAuth client
+#                          from console.cloud.google.com, type Web
+#                          application, redirect URI registered exactly:
 #                          https://YOUR-RENDER-URL/api/v1/email/oauth/callback
+#                          While the OAuth app is unverified (Testing
+#                          mode), only test users added in Google Cloud
+#                          Console (Audience, Test users) can connect —
+#                          everyone else uses option 1 above.
 #   BACKEND_URL            https://YOUR-RENDER-URL (no trailing slash) —
 #                          must match the host in that redirect URI.
-#                          While the Google OAuth app is in Testing
-#                          mode, only test users added in Google Cloud
-#                          Console, Audience, Test users can connect
-#                          Gmail — everyone else still sends fine
-#                          through SendGrid regardless.
+#
+#   RELAY_URL              App password path (self hosted / dev only).
+#   RELAY_SECRET           Render blocks outbound SMTP, so an app password
+#                          only sends when RELAY_URL points at a relay
+#                          service (see relay/) on a host that allows
+#                          outbound SMTP. Left unset in production, where
+#                          this path stays dormant; options 1 and 2 cover
+#                          sending. RELAY_SECRET must match the relay.
 
 services:
   - type: web
@@ -83,10 +67,6 @@ services:
       - key: GOOGLE_CLIENT_SECRET
         sync: false
       - key: BACKEND_URL
-        sync: false
-      - key: SENDGRID_API_KEY
-        sync: false
-      - key: SENDGRID_FROM_EMAIL
         sync: false
       - key: RELAY_URL
         sync: false

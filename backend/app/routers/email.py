@@ -35,7 +35,7 @@ from app.core.database import get_db
 from app.core.auth import decode_token
 from app.models import EmailSend, Job, Profile, Resume, User
 from app.routers.auth import get_current_user
-from app.services import ai_service, email_service, gmail_service, sendgrid_service
+from app.services import ai_service, email_service, gmail_service
 
 router = APIRouter(prefix="/email", tags=["email"])
 log = logging.getLogger(__name__)
@@ -75,10 +75,12 @@ def _out(e: EmailSend) -> dict:
 
 @router.get("/oauth/status")
 async def oauth_status():
-    return {
-        "available": gmail_service.is_configured(),
-        "default_sending_available": sendgrid_service.is_configured(),
-    }
+    # available == the server has Google OAuth credentials set, so the
+    # Connect Gmail button can appear. It still only completes for
+    # accounts on the app's Google test user list while the OAuth app is
+    # unverified. There is no shared server side sender any more: everyone
+    # else sends from their own mailbox via the Open in my mail app path.
+    return {"available": gmail_service.is_configured()}
 
 
 @router.get("/oauth/start")
@@ -283,19 +285,18 @@ async def send_email_now(
 
     res = await db.execute(select(Profile).where(Profile.user_id == u.id))
     profile = res.scalar_one_or_none()
+    # Server side sending only ever leaves from the user's own connected
+    # mailbox — Gmail OAuth, or an app password (self hosted only). There
+    # is deliberately no shared sender: a stranger without a connection
+    # sends by opening the draft in their own mail app instead, which the
+    # frontend offers whenever this is not available.
     use_gmail = bool(profile and profile.gmail_refresh_token_encrypted)
     use_smtp = bool(profile and profile.smtp_password_encrypted)
-    # A user's own address always wins over the shared SendGrid sender:
-    # both Gmail OAuth and the app password path send from the applicant's
-    # literal mailbox, which lands in the inbox and reads as genuinely
-    # from them. SendGrid is only the zero setup fallback for someone who
-    # has connected nothing of their own yet.
-    use_sendgrid = bool(not use_gmail and not use_smtp and sendgrid_service.is_configured())
-    if not (use_gmail or use_smtp or use_sendgrid):
+    if not (use_gmail or use_smtp):
         raise HTTPException(
             422,
-            "No sending account is configured yet. Add your own email address and app password in "
-            "settings so applications send from your mailbox.",
+            "This draft can only be sent from your own connected address. Connect Gmail in "
+            "settings, or use Open in my mail app to send it from your own email.",
         )
 
     # The resume goes out attached to every application email, no
@@ -373,24 +374,6 @@ async def send_email_now(
                 await email_service.send_via_relay(**smtp_args)
             else:
                 await email_service.send_email(**smtp_args)
-        elif use_sendgrid:
-            # The default path: works for every user with nothing set up
-            # on their end. Reply To carries the applicant's own address
-            # so a recruiter's reply still reaches them, even though the
-            # message technically leaves from ApplyPilot's one verified
-            # sender rather than the applicant's literal mailbox.
-            rp = (resume.parsed_data or {}) if resume else {}
-            reply_email = rp.get("email") or (profile.sender_email if profile else None) or u.email
-            reply_name = rp.get("name") or u.full_name or "Applicant"
-            msg = email_service.build_message(
-                sender_email=settings.SENDGRID_FROM_EMAIL,
-                recipient_email=e.recipient_email,
-                subject=e.subject,
-                body=e.body,
-                attachment_bytes=attachment_bytes,
-                attachment_filename=attachment_filename,
-            )
-            await sendgrid_service.send_message(msg, reply_email, reply_name)
         e.status = "sent"
         e.sent_at = datetime.now(timezone.utc)
         e.error_msg = None

@@ -117,30 +117,42 @@ render.yaml                  Render blueprint (backend only)
   Raw SMTP delivery cannot work from Render, period, no matter how the
   sockets are built (confirmed against production, not theoretical). Every
   sending path on Render has to leave over HTTPS instead.
-- Three sending paths, tried in this order in `POST /email/{id}/send`:
-  1. **Gmail OAuth** (`gmail_service.py`), if `Profile.gmail_refresh_token_encrypted`
-     is set — sends from the user's own literal Gmail address. Requires the
-     user to click Connect Gmail. While Google's OAuth app is in Testing
-     mode, only test users added in Google Cloud Console (Audience, Test
-     users) can complete that connection, and Google expires every
-     connection after 7 days regardless of use.
-  2. **SendGrid** (`sendgrid_service.py`), if `SENDGRID_API_KEY` and
-     `SENDGRID_FROM_EMAIL` are set — the default, zero setup path that
-     works for every user immediately. Sends from one shared verified
-     sender with the applicant's name in the display name and their real
-     email as Reply To, so a recruiter's reply still reaches the actual
-     person. `SENDGRID_FROM_EMAIL` only needs Single Sender Verification
-     (click a link SendGrid emails you) — no domain or DNS required, which
-     is the whole reason this path exists: it must never require anything
-     from the app's end users, and as little as possible from whoever runs
-     the backend.
-  3. **SMTP app password** (`email_service.py`) — kept for local
-     development and docker compose, where outbound SMTP isn't blocked.
-     Never works on Render itself.
-  All three share one MIME message builder, `email_service.build_message()`
-  (multipart/mixed [ multipart/alternative [ plain, HTML derived from the
-  plain text at send time ], resume attachment ]), so the message a
-  recipient gets is identical no matter which path sent it.
+- **There is no shared server side sender.** Every email leaves from the
+  sending user's own address. A previous SendGrid shared-sender path was
+  removed on purpose: without domain authentication it landed in spam and
+  read as "Name via ApplyPilot" from the backend owner's mailbox, both
+  unacceptable. Do not reintroduce a shared sender without a real,
+  domain-authenticated one.
+- Sending paths:
+  1. **Open in my mail app** (frontend `openMailAppMut` in
+     `apply/page.tsx`) — the universal path, needs nothing configured.
+     Builds a `mailto:` with the drafted subject/body so the user's own
+     mail client sends from their real address, and downloads the resume
+     (`GET /resumes/{id}/download`) for a one-click manual attach, since
+     browsers block programmatic mailto attachments. This is the primary
+     button for anyone who has not connected their own address.
+  2. **Gmail OAuth** (`gmail_service.py`), if
+     `Profile.gmail_refresh_token_encrypted` is set — one click server
+     side send from the user's own literal Gmail via the Gmail HTTPS API
+     (Render blocks raw SMTP, the API is not blocked). While Google's
+     OAuth app is in Testing mode, only test users added in Google Cloud
+     Console (Audience, Test users) can complete that connection, and
+     Google expires every connection after 7 days. This is effectively the
+     project owner's own path.
+  3. **SMTP app password** (`email_service.py`) — dormant in production.
+     Render blocks outbound SMTP, so this only sends when `RELAY_URL`
+     points at a relay service (`relay/`, a tiny FastAPI app for a host
+     that allows outbound SMTP; `email_service.send_via_relay`) or when
+     self-hosted / docker compose where SMTP works. No free no-card host
+     allowing outbound SMTP was found (Fly, Koyeb, Oracle all gate signup
+     behind a card), so the relay stays unhosted and this path is unused
+     live. The UI keeps the app-password form buried as self-hosted-only.
+  `POST /email/{id}/send` handles paths 2 and 3 (Gmail then app-password
+  via relay), and 422s if neither is connected — the frontend only shows
+  the server send button when `gmail_connected || email_account_configured`,
+  otherwise it shows the mail-app button. All paths share one MIME builder,
+  `email_service.build_message()` (multipart/mixed [ multipart/alternative
+  [ plain, HTML derived at send time ], resume attachment ]).
 - Gmail OAuth flow: `GET /email/oauth/start` (authenticated) returns
   Google's consent URL, with the caller's own JWT plus a `return_to` hint
   as the `state` parameter (`token::settings` or `token::onboarding`) — the
@@ -165,8 +177,9 @@ render.yaml                  Render blueprint (backend only)
   shared platform) homepage, ever** — confirmed directly against Google's
   own stated policy. Getting out of Testing mode without a per person test
   user list requires a real, personally registered domain. This project
-  deliberately stayed in Testing mode rather than buy one; SendGrid is what
-  makes the product work for everyone regardless.
+  deliberately stayed in Testing mode rather than buy one; the "Open in my
+  mail app" path (path 1 above) is what makes the product work for everyone
+  regardless, sending from each user's own address with nothing to set up.
 
 ## Storage gotchas
 

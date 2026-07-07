@@ -41,16 +41,6 @@ class Settings(BaseSettings):
     # URI (must match the one registered in the Google Cloud console).
     BACKEND_URL: str = "http://localhost:8000"
 
-    # SendGrid — the default mail path, works for every user with no
-    # setup on their part. Render blocks outbound SMTP network wide, so
-    # this goes out over HTTPS like the Gmail path, but needs no OAuth
-    # and no per user connection: one verified sender email (verified
-    # once, by clicking a link SendGrid emails you, no domain or DNS
-    # needed) sends on behalf of everyone, with Reply To set to each
-    # applicant's own address so replies still reach the right person.
-    SENDGRID_API_KEY: str = ""
-    SENDGRID_FROM_EMAIL: str = ""
-
     # SMTP relay — the "send from the user's own Gmail" path. Render blocks
     # outbound SMTP, so when a user connects their own address with a Gmail
     # app password, the backend cannot reach smtp.gmail.com itself. Instead

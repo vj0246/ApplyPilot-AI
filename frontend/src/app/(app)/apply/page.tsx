@@ -7,7 +7,7 @@ import {
   Zap, FileText, Briefcase, Loader2, MessageSquare,
   Sparkles, Copy, Link2, ExternalLink, AlertTriangle, ShieldCheck, Send, Pencil, Mail,
 } from "lucide-react";
-import { resumeApi, jobApi, appApi, autofillApi, emailApi } from "@/lib/api";
+import { resumeApi, jobApi, appApi, autofillApi, emailApi, profileApi } from "@/lib/api";
 import { Card, Badge, Textarea } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
@@ -54,6 +54,14 @@ function ApplyPageInner() {
     queryKey: ["jobs"],
     queryFn: () => jobApi.list().then(r => r.data),
   });
+  const { data: profile } = useQuery({
+    queryKey: ["profile"],
+    queryFn: () => profileApi.get().then(r => r.data),
+  });
+  // Server side sending only works from the user's own connected mailbox
+  // (Gmail OAuth, or an app password on a self hosted backend). Everyone
+  // else sends by opening the draft in their own mail app.
+  const canServerSend = !!profile?.gmail_connected || !!profile?.email_account_configured;
 
   const readyResumes = (resumesData?.items || []).filter((r: any) => r.status === "ready");
   const readyJobs    = (jobsData?.items   || []).filter((j: any) => j.status === "ready");
@@ -678,9 +686,10 @@ function ApplyPageInner() {
                 <p className="text-blue-700">
                   This writes an application email about the job description from your resume
                   and your knowledge graph. Nothing goes out until you review the draft below,
-                  edit it if you want, and press send. Open it in your own mail app to send from
-                  your real address with zero setup, or send instantly through ApplyPilot's
-                  server instead.
+                  edit it if you want, and press send. Every email goes from your own real
+                  address{canServerSend
+                    ? " — you have connected it, so one click sends it with your resume attached."
+                    : ", by opening the draft in your own mail app. Connect Gmail in settings for one click sending instead."}
                 </p>
               </div>
             </div>
@@ -806,34 +815,49 @@ function ApplyPageInner() {
                     >
                       Save edits
                     </button>
+                    {canServerSend ? (
+                      <button
+                        onClick={() => sendEmailMut.mutate()}
+                        disabled={sendEmailMut.isPending}
+                        className="btn-primary flex-1 justify-center"
+                      >
+                        {sendEmailMut.isPending ? (
+                          <><Loader2 className="w-4 h-4 animate-spin" /> Sending...</>
+                        ) : (
+                          <><Send className="w-4 h-4" /> Send from my Gmail</>
+                        )}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => openMailAppMut.mutate()}
+                        disabled={openMailAppMut.isPending || !recipientEmail.trim()}
+                        className="btn-primary flex-1 justify-center"
+                      >
+                        {openMailAppMut.isPending ? (
+                          <><Loader2 className="w-4 h-4 animate-spin" /> Preparing...</>
+                        ) : (
+                          <><Mail className="w-4 h-4" /> Open in my mail app</>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                  {canServerSend && (
                     <button
-                      onClick={() => sendEmailMut.mutate()}
-                      disabled={sendEmailMut.isPending}
-                      className="btn-primary flex-1 justify-center"
+                      onClick={() => openMailAppMut.mutate()}
+                      disabled={openMailAppMut.isPending || !recipientEmail.trim()}
+                      className="text-xs text-gray-400 hover:text-gray-600 w-full text-center flex items-center justify-center gap-1"
                     >
-                      {sendEmailMut.isPending ? (
-                        <><Loader2 className="w-4 h-4 animate-spin" /> Sending...</>
+                      {openMailAppMut.isPending ? (
+                        <><Loader2 className="w-3 h-3 animate-spin" /> Preparing...</>
                       ) : (
-                        <><Send className="w-4 h-4" /> Send now</>
+                        <><Mail className="w-3 h-3" /> Or open in my own mail app instead</>
                       )}
                     </button>
-                  </div>
-                  <button
-                    onClick={() => openMailAppMut.mutate()}
-                    disabled={openMailAppMut.isPending || !recipientEmail.trim()}
-                    className="text-xs text-gray-400 hover:text-gray-600 w-full text-center flex items-center justify-center gap-1"
-                  >
-                    {openMailAppMut.isPending ? (
-                      <><Loader2 className="w-3 h-3 animate-spin" /> Preparing...</>
-                    ) : (
-                      <><Mail className="w-3 h-3" /> Or open in my own mail app instead (requires one set up on this device)</>
-                    )}
-                  </button>
+                  )}
                   <p className="text-xs text-gray-400">
-                    "Send now" sends instantly, resume attached automatically, no setup needed on
-                    your end. The mail app option below leaves from your own literal address, but
-                    only works if you have Gmail, Outlook, or similar set up as an app already, and
-                    it downloads your resume for you to attach by hand.
+                    {canServerSend
+                      ? "Send from my Gmail sends instantly from your connected address, resume attached automatically. The mail app option opens your own mail client with the draft ready, and downloads the resume for you to attach by hand."
+                      : "This opens your own mail client (Gmail, Outlook, or whatever you use) with the draft already filled in, so it goes from your real address. Your resume downloads at the same time, attach it with one click before you send, since mail apps block automatic attachments. Connect Gmail in settings for one click sending with the resume attached for you."}
                   </p>
                 </>
               )}

@@ -563,15 +563,13 @@ function SettingsPageInner() {
                 <div className="flex gap-3">
                   <Mail className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
                   <div className="text-sm text-blue-900">
-                    <p className="font-medium mb-0.5">Sending already works, nothing to set up</p>
+                    <p className="font-medium mb-0.5">Every email sends from your own real address</p>
                     <p className="text-blue-700">
-                      {gmailOauthStatus?.default_sending_available
-                        ? "Every application email you send already goes out with no setup on your part. The recruiter's reply lands in your own inbox either way, since Reply To is always set to your real email."
-                        : "Connect an account below so sending works."}
-                      {" "}Connecting Gmail below is optional, and only changes one thing: the email
-                      leaves from your literal Gmail address instead of ApplyPilot's shared sender.
-                      Nothing is ever sent automatically, every email is drafted first and only goes
-                      out when you press send.
+                      You do not have to set anything up. When you send an application, you can open
+                      the draft in your own mail app and it goes straight from your real address.
+                      Connecting Gmail below is optional and only adds one click sending, straight
+                      from the app, with your resume attached automatically. Nothing is ever sent
+                      without you reviewing the draft and pressing send first.
                     </p>
                   </div>
                 </div>

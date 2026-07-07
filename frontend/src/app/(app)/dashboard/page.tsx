@@ -26,19 +26,14 @@ export default function DashboardPage() {
     queryKey: ["profile"],
     queryFn: () => profileApi.get().then(r => r.data),
   });
-  const { data: gmailOauthStatus } = useQuery({
-    queryKey: ["gmail-oauth-status"],
-    queryFn: () => emailApi.oauthStatus().then(r => r.data),
-  });
-
   const items = apps?.items || [];
   const hasResume = (resumes?.items || []).some((r: any) => r.status === "ready");
-  // Sending works out of the box once SendGrid is configured on the
-  // server — nobody has to connect anything for mail to work, so this
-  // only shows up as a setup step when there is truly no way to send.
+  // "Has an email account" means the user connected their own address for
+  // one click server side sending. It is not strictly required — anyone
+  // can always open a draft in their own mail app — so this is a soft
+  // nudge, not a blocker.
   const hasEmailAccount = !!profile?.email_account_configured
-    || !!profile?.gmail_connected
-    || !!gmailOauthStatus?.default_sending_available;
+    || !!profile?.gmail_connected;
   const kg = profile?.knowledge_graph;
   const hasMemory = !!(kg && (kg.identity || (kg.values || []).length > 0));
   const setupDone = hasResume && hasEmailAccount && hasMemory;
@@ -98,7 +93,7 @@ export default function DashboardPage() {
           <div className="space-y-2">
             <ChecklistItem done={hasResume} href="/resume" text="Upload your resume" />
             <ChecklistItem done={hasMemory} href="/settings?tab=knowledge" text="Build your memory, answer a few questions about yourself" />
-            <ChecklistItem done={hasEmailAccount} href="/settings?tab=email" text="Connect your email account for sending" />
+            <ChecklistItem done={hasEmailAccount} href="/settings?tab=email" text="Connect Gmail for one click sending (optional, you can always use your own mail app)" />
           </div>
         </Card>
       )}
@@ -146,8 +141,7 @@ export default function DashboardPage() {
           hint={
             profile?.gmail_connected ? `Sends as ${profile.gmail_address}` :
             profile?.email_account_configured ? `Sends as ${profile.sender_email}` :
-            gmailOauthStatus?.default_sending_available ? "Sending works, Gmail optional" :
-            "Not connected"
+            "Uses your own mail app"
           } ok={hasEmailAccount} />
         <SmallAction href="/apply?tab=generate" icon={Sparkles} label="Full Kit"
           hint="Cover letter, email, resume" ok />
