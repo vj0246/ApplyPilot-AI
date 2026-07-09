@@ -41,11 +41,41 @@ _current_key_index = 0
 WRITING_STANDARDS = """
 Writing standards, follow every one of these without exception:
 1. Write like a real, high impact human, not like an AI and not like a template.
-2. Never use an abbreviation or an acronym. Spell every word and phrase out in full. Write "for example" instead of "e.g.", "and so on" instead of "etc.", "artificial intelligence" instead of "AI", "United States" instead of "US", "application" instead of "app".
-3. Never use a hyphen or a dash of any kind, anywhere, including inside compound words. If a word would normally be hyphenated, either join it into one word or rewrite the phrase with "to" or a comma instead.
-4. Be concrete and specific. Every sentence should earn its place and say something a generic answer could not say.
-5. Every amount of money, salary, stipend, or compensation is always expressed in Indian Rupees, written as "Indian Rupees" or with the rupee symbol. Never quote dollars, euros, pounds, or any other currency, even if the job posting used one; state the figure in Indian Rupees instead.
+2. Never use an abbreviation or an acronym in your own prose. Spell every word and phrase out in full. Write "for example" instead of "e.g.", "and so on" instead of "etc.", "artificial intelligence" instead of "AI", "United States" instead of "US", "application" instead of "app". One firm exception: a proper noun or official name is always copied character for character and never expanded or reworded, including company names (write "Nexus AI", never "Nexus artificial intelligence"), product names, technology and tool names (FastAPI, SQL, Next.js), and every job title exactly as given, both the posting's title and any past or current title of the candidate (write "AI Engineering Intern", never "artificial intelligence engineering intern").
+3. When spelling a term out in full would read clunky, or the spelled out phrase has already appeared once, do what a real person does and rephrase with a plain natural word instead of repeating the long expansion. Write "services" or "systems" instead of repeating "application programming interfaces", "the model" or "the extraction system" instead of repeating "large language model" again and again. Never repeat the same distinctive multiword phrase more than twice in one piece of writing.
+4. Never use a hyphen or a dash of any kind, anywhere, including inside compound words. If a word would normally be hyphenated, either join it into one word or rewrite the phrase with "to" or a comma instead. This never applies inside a proper name or link that contains one.
+5. Be concrete and specific. Every sentence should earn its place and say something a generic answer could not say.
+6. Every amount of money, salary, stipend, or compensation is always expressed in Indian Rupees, written as "Indian Rupees" or with the rupee symbol. Never quote dollars, euros, pounds, or any other currency, even if the job posting used one; state the figure in Indian Rupees instead.
+7. Never write any of these anywhere, they instantly read as machine generated: "excited to apply", "thrilled", "honored", "passionate", "leverage" in any form, "proven" before any noun, "delve", "showcase", "competence". Say plainly what was done and what it achieved instead.
 """
+
+
+# Deterministic last line of defense. The prompt already bans these, but
+# the model still slips one in every few runs, and a single "leveraging my
+# proven ability" is enough to make a whole email read machine written.
+# Only substitutions that are grammatically safe in any sentence belong
+# here — anything needing real rewriting stays a prompt problem.
+_AI_TELL_SUBS = [
+    (re.compile(r"\bleveraging\b", re.I), "using"),
+    (re.compile(r"\bleverages\b", re.I), "uses"),
+    (re.compile(r"\bleverage\b", re.I), "use"),
+    (re.compile(r"\bproven track record\b", re.I), "track record"),
+    (re.compile(r"\bproven ability\b", re.I), "ability"),
+    (re.compile(r"\bexcited to apply\b", re.I), "applying"),
+    (re.compile(r"\bI am thrilled\b", re.I), "I am glad"),
+    (re.compile(r"\bI would be honored\b", re.I), "I would be glad"),
+    (re.compile(r"\bshowcasing\b", re.I), "showing"),
+    (re.compile(r"\bshowcases\b", re.I), "shows"),
+    (re.compile(r"\bshowcase\b", re.I), "show"),
+]
+
+
+def _scrub_ai_tells(text: str) -> str:
+    for pattern, replacement in _AI_TELL_SUBS:
+        def _sub(m: re.Match, replacement: str = replacement) -> str:
+            return replacement[0].upper() + replacement[1:] if m.group(0)[0].isupper() else replacement
+        text = pattern.sub(_sub, text)
+    return text
 
 
 def _custom_instructions_block(custom_instructions: str) -> str:
@@ -66,7 +96,13 @@ def _client(key: str) -> AsyncGroq:
     return AsyncGroq(api_key=key)
 
 
-async def _chat(prompt: str, system: str = "", temperature: float = 0.4, max_tokens: int = 2000) -> str:
+async def _chat(
+    prompt: str,
+    system: str = "",
+    temperature: float = 0.4,
+    max_tokens: int = 2000,
+    response_format: Optional[Dict[str, str]] = None,
+) -> str:
     global _current_key_index
 
     keys = settings.GROQ_API_KEYS
@@ -89,11 +125,15 @@ async def _chat(prompt: str, system: str = "", temperature: float = 0.4, max_tok
     for offset in range(len(keys)):
         i = (start + offset) % len(keys)
         try:
+            kwargs: Dict[str, Any] = {}
+            if response_format:
+                kwargs["response_format"] = response_format
             resp = await _client(keys[i]).chat.completions.create(
                 model=settings.GROQ_MODEL,
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                **kwargs,
             )
             _current_key_index = i
             return resp.choices[0].message.content or ""
@@ -111,13 +151,25 @@ async def _chat(prompt: str, system: str = "", temperature: float = 0.4, max_tok
     return ""
 
 
-async def _json_chat(prompt: str, system: str = "") -> Dict[str, Any]:
+async def _json_chat(prompt: str, system: str = "", max_tokens: int = 2000) -> Dict[str, Any]:
     # Groq sometimes wraps the response in ```json fences even when told
     # not to, especially on longer outputs — strip those before parsing.
     # If that still doesn't parse, grab the biggest {...} chunk and try
     # that as a last resort.
+    # max_tokens matters more here than anywhere else: a JSON response cut
+    # off mid string never parses, so the caller silently lands on its
+    # regex fallback and the output quality drops across the board. Calls
+    # that can legitimately return a lot of JSON (a dense resume, twenty
+    # form answers) must pass a higher cap.
     sys = (system or "") + "\n\nIMPORTANT: Respond with ONLY valid JSON. No markdown fences, no explanation, no extra text before or after the JSON."
-    raw = (await _chat(prompt, sys, temperature=0.1)).strip()
+    raw = (
+        await _chat(
+            prompt, sys, temperature=0.1, max_tokens=max_tokens,
+            # Groq JSON mode: the model cannot return prose or a truncated
+            # object, which was the intermittent cause of silent fallbacks.
+            response_format={"type": "json_object"},
+        )
+    ).strip()
 
     raw = re.sub(r"^```(?:json)?\s*", "", raw)
     raw = re.sub(r"\s*```$", "", raw).strip()
@@ -156,7 +208,14 @@ Parsing rules, follow all of them:
 5. Keep numbers and metrics inside bullets exactly as written, never round or reword them
 6. Do not drop skills because they look minor, list every tool, framework, library, and language
    mentioned anywhere in the text
-7. Never invent anything that is not in the text, an empty string or null beats a guess
+7. The text comes from a PDF extractor, so lines may be broken mid sentence, section headings may
+   run into content, and two column layouts may interleave. Mentally reassemble the resume before
+   extracting: a bullet split across lines is one bullet, and a date or company sitting on its own
+   line belongs to the nearest role heading
+8. Write each experience bullet as a complete, self contained achievement statement, keeping every
+   metric, and each project description as one or two sentences that say what it does and what it
+   achieved, not just its name
+9. Never invent anything that is not in the text, an empty string or null beats a guess
 
 Return ONLY a JSON object with this exact structure:
 {
@@ -201,7 +260,7 @@ Return ONLY a JSON object with this exact structure:
   "awards": ["award or achievement"]
 }"""
 
-    result = await _json_chat(f"Parse this resume:\n\n{raw_text[:12000]}", system)
+    result = await _json_chat(f"Parse this resume:\n\n{raw_text[:20000]}", system, max_tokens=4000)
     # The model must return one object here. Some models (seen with
     # gpt-oss) occasionally return a JSON array instead — a list crashes
     # every .get() downstream, so anything that isn't a dict falls back.
@@ -461,7 +520,7 @@ Extra context from applicant: {extra_context}"""
     # variation between runs, it's what makes the Regenerate button
     # on the review page actually useful
     result = await _chat(prompt, system, temperature=0.7, max_tokens=600)
-    return result.strip() if result else _fallback_cover_letter(name, job_parsed, fit)
+    return _scrub_ai_tells(result.strip()) if result else _fallback_cover_letter(name, job_parsed, fit)
 
 
 def _fallback_cover_letter(name: str, job: Dict, fit: Dict) -> str:
@@ -550,18 +609,20 @@ by a blank line. This is the layout of a normal, warm, professional application 
 1. "Dear Hiring Team," on its own line (or "Dear [Name]," if a recipient name is given)
 2. "I hope you are doing well." on its own line
 3. An interest paragraph: state interest in the exact role at the exact company, then one sentence
-   positioning who the candidate is (their study or current role and focus) and why this specific
-   company's work excites them
+   positioning who the candidate is (their study or current role and focus) and one grounded
+   sentence on why this role fits the work they already do, stated as fact, not as excitement
 4. A projects paragraph, the heart of the email: walk through two or three real projects from the
    list below in flowing sentences, each with what was concretely built, the methods or tools used,
-   and what it demonstrated. Only projects that are listed, never an invented one
+   and what it demonstrated. Only projects that are listed, never an invented one. Open each
+   project's sentences differently; never the same "In the X project I built" pattern repeated,
+   which reads as a template
 5. An honest alignment paragraph: name what in their background maps directly to what this job asks
    for, acknowledge gracefully anything the role centers on that their work has only been adjacent
    to, and state the concrete skills they are confident in and what they are eager to deepen
-6. A contribution paragraph: one or two sentences of genuine enthusiasm about what they would help
-   build at this company, tied to what the company actually does
-7. A closing paragraph: thank them for their time and consideration, and say they would be grateful
-   for the opportunity to discuss how their background aligns with the requirements
+6. A contribution paragraph: one or two sentences on what they would concretely contribute at this
+   company, tied to what the company actually does, stated as a capability, never as a plea
+7. A closing paragraph: thank them for their time and consideration, and say they would welcome a
+   conversation about how their background fits the role
 8. A signature block, each item on its own line, exactly like this:
    "Kind regards,"
    the candidate's full name
@@ -582,9 +643,15 @@ What makes an email high impact, hold every sentence to this bar:
 - Every claim is evidenced. Do not say they are strong at something; show the project or the role
   where they did it.
 - Active voice, varied sentence length, no filler and no cliches ("fast paced environment", "team
-  player", "passion for", "wear many hats"). It should read like one sharp person wrote it, not a
-  template.
+  player", "passion for", "wear many hats", "leverage", "proven track record", "I am writing to
+  express"). It should read like one sharp person wrote it, not a template.
 - Warm and confident, never groveling and never arrogant. Respect the reader's time.
+- Never desperate. One clear statement of interest is enough for the whole email; never repeat how
+  much they want the job, never over praise the company, never apologize for a gap, and never
+  plead ("any opportunity would mean the world", "I would be honored", "even a small chance").
+  The posture throughout is a capable professional laying out evidence of fit between their
+  experience, skills, and projects and what this role asks for, and letting that evidence carry
+  the email.
 
 Non negotiable rules:
 1. Read the required skills and responsibilities given below and mirror the ones that matter most,
@@ -595,6 +662,10 @@ Non negotiable rules:
 4. Sound like a real, thoughtful, confident professional wrote this personally for this one role
 5. Ground the projects and alignment paragraphs in the real experience and projects given below;
    pick the ones that best match this job, do not just list the most recent
+6. Never write any form of "leverage", "proven track record", "proven ability", or the spelled out
+   phrase "application programming interface". Where that last phrase would appear, write
+   "services", "backends", or "endpoints" instead; these read like a person, the expansion reads
+   like a machine
 {WRITING_STANDARDS}{_custom_instructions_block(custom_instructions)}
 Return JSON: {{"subject": "...", "body": "..."}}"""
 
@@ -602,7 +673,7 @@ Return JSON: {{"subject": "...", "body": "..."}}"""
 behalf to a recipient at the company.
 
 Candidate: {name}
-Current role or education: {current_role or edu_line}
+Current role or education (copy any title or institution name exactly as written here): {current_role or edu_line}
 Candidate's GitHub link: {github_url or "(none on file)"}
 Candidate's LinkedIn link: {linkedin_url or "(none on file)"}
 Candidate's work experience:
@@ -618,23 +689,39 @@ This company's culture signals: {culture}
 {graph_context}
 Extra context from the candidate: {extra_context}"""
 
-    result = await _json_chat(prompt, system)
+    result = await _json_chat(prompt, system, max_tokens=4000)
     if isinstance(result, list):
         result = next((x for x in result if isinstance(x, dict)), None)
-    if isinstance(result, dict) and result.get("subject"):
-        return result
+    # gpt-oss sometimes nests the payload, {"email": {"subject": ...}} —
+    # dig one level before giving up on a perfectly good response.
+    if isinstance(result, dict) and not result.get("subject"):
+        result = next(
+            (v for v in result.values() if isinstance(v, dict) and v.get("subject")),
+            result,
+        )
+    if isinstance(result, dict) and result.get("subject") and result.get("body"):
+        return {
+            "subject": _scrub_ai_tells(str(result["subject"])),
+            "body": _scrub_ai_tells(str(result["body"])),
+        }
 
     # Fallback mirrors the exact same layout the prompt demands, so a
     # Groq outage degrades the writing, never the structure.
     who = current_role or edu_line or f"a professional with a background in {top_skill_str}"
 
     projects_para = ""
-    if project_lines:
-        pieces = []
-        for p in project_lines[:3]:
-            pname, _, pdesc = p.partition(":")
-            pieces.append(f"I built {pname.strip()}" + (f", {pdesc.strip()}" if pdesc.strip() else ""))
-        projects_para = ". ".join(pieces) + ".\n\n"
+    fallback_pieces = []
+    for pr in (rp.get("projects") or [])[:3]:
+        pname = (pr.get("name") or "").strip()
+        if not pname:
+            continue
+        pdesc = (pr.get("description") or "").strip().rstrip(".")
+        if pdesc:
+            fallback_pieces.append(f"I built {pname}: {pdesc}")
+        else:
+            fallback_pieces.append(f"I built {pname}")
+    if fallback_pieces:
+        projects_para = ". ".join(fallback_pieces) + ".\n\n"
 
     signature_lines = ["Kind regards,", "", name, "", "Resume Attached"]
     if linkedin_url:
@@ -901,7 +988,9 @@ Grounding facts about {name}:
 {learned_block}
 
 Rules for every answer:
-1. Be specific, use real facts from the candidate's background above
+1. Be specific, use real facts from the candidate's background above. Never invent a number,
+   metric, user count, or outcome that is not written above; a real fact stated plainly beats an
+   impressive one that was made up
 2. When a question asks for one exact, narrow fact that is listed above word for word, such as an
    email address, a phone number, a GPA or CGPA, a college name, or a profile link, answer with that
    exact value, copied exactly, never reworded or approximated. Only for this narrow kind of exact
@@ -919,18 +1008,28 @@ Rules for every answer:
    sentences. Exact facts like emails, links, or numbers are always answered with just that value
    regardless of the box
 5. Never use: "I am passionate about", "synergy", "leverage", "hard working", "team player"
-6. Sound genuine, confident, and direct
+6. Sound genuine, confident, and direct, never desperate or over eager. No pleading ("I would be
+   honored", "dream company", "any opportunity"), no exclamation marks, no over praising the
+   company. State what was built, what it shows, and how it maps to what this role asks for, and
+   let the evidence speak
 7. If a question asks about salary, give a reasonable range in Indian Rupees based on industry
    norms for that role in India, never in any other currency
-8. For "Why this company?", reference something specific about {company} (culture: {culture})
+7b. Refer to the role and the company by their exact names as given, "{jt}" and "{company}",
+   copied character for character, never expanded, translated, or reworded
+8. For "Why this company?", ground every claim about {company} strictly in what is given here
+   (culture: {culture}) or in the role's own responsibilities and required skills. Never invent a
+   fact about the company, its reputation, its research, or its culture that is not given; when
+   little is known about the company, anchor the answer in the role itself and in how the
+   candidate's real work maps to it
 {WRITING_STANDARDS}{_custom_instructions_block(custom_instructions)}
-Return a JSON array, one object per question:
-[{{"question": "...", "answer": "..."}}]"""
+Return a JSON object with one key "answers" holding an array, one object per question:
+{{"answers": [{{"question": "...", "answer": "..."}}]}}"""
 
     qs_formatted = "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions))
     result = await _json_chat(
         f"Answer these application questions:\n\n{qs_formatted}",
         system,
+        max_tokens=4000,
     )
 
     # This one must be a list. Some models wrap it in an object like
@@ -944,6 +1043,9 @@ Return a JSON array, one object per question:
     if isinstance(result, list):
         result = [x for x in result if isinstance(x, dict)]
         if result:
+            for item in result:
+                if isinstance(item.get("answer"), str):
+                    item["answer"] = _scrub_ai_tells(item["answer"])
             return result
 
     answers = []

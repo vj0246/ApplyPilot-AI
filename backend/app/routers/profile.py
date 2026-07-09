@@ -18,19 +18,14 @@ router = APIRouter(prefix="/profile", tags=["profile"])
 # that makes a form answer or an email sound like one particular human
 # wrote it instead of anyone with a similar resume.
 KNOWLEDGE_GRAPH_QUESTIONS = [
-    "How would you describe yourself to someone who has never met you?",
-    "What is a piece of work you are genuinely proud of, and why does it matter to you?",
-    "What kind of problems do you enjoy solving most, and why those?",
-    "What do you value most in a team or a workplace?",
-    "Describe a time you overcame a real setback. What did you learn?",
-    "What drives you to keep doing this kind of work?",
-    "How do people who work closely with you tend to describe you?",
+    "In two or three sentences, who are you professionally?",
+    "Where have you worked or interned, and what did you actually do there?",
+    "Which projects should an employer know about? For each: what it does, what you built it with, and the result.",
+    "What work are you most proud of, and why?",
+    "What do you know most deeply, and how did you learn it?",
+    "What kind of problems do you enjoy solving?",
     "What are you working toward over the next few years?",
-    "What subjects or fields do you know most deeply, and how did you get there?",
-    "Walk me through your work or internship experience so far. Where have you worked, what did you actually do there, and what came of it?",
-    "What projects have you built or contributed to that you would want an employer to know about? For each one, what does it do, what did you build it with, and what was the result?",
-    "What genuinely interests you, inside or outside of work?",
-    "When you have to choose, what do you put first, and what does that say about your priorities?",
+    "What do you value in a team, and what genuinely interests you outside work?",
 ]
 
 
