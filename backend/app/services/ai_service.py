@@ -78,6 +78,46 @@ def _scrub_ai_tells(text: str) -> str:
     return text
 
 
+# One deliberate, natural looking misspelling per email — a perfectly
+# spelled email is itself a tell. Ordered so the less common words are
+# tried first; "experience" sits last as the near guaranteed fallback.
+_TYPO_SUBS = [
+    (re.compile(r"\bgenuinely\b", re.I), "genuinly"),
+    (re.compile(r"\bopportunity\b", re.I), "oppurtunity"),
+    (re.compile(r"\bdefinitely\b", re.I), "definately"),
+    (re.compile(r"\breceive\b", re.I), "recieve"),
+    (re.compile(r"\bimmediately\b", re.I), "immediatly"),
+    (re.compile(r"\benvironment\b", re.I), "enviroment"),
+    (re.compile(r"\bparticularly\b", re.I), "particuarly"),
+    (re.compile(r"\bbelieve\b", re.I), "beleive"),
+    (re.compile(r"\bachievements\b", re.I), "acheivements"),
+    (re.compile(r"\bexperience\b", re.I), "experiance"),
+]
+
+
+def _add_human_typo(body: str) -> str:
+    """Insert exactly one misspelling into the email body. Never touches the
+    signature block, and never a line carrying a link or an email address,
+    where a typo would break something real instead of looking human."""
+    lines = body.split("\n")
+    sig_start = len(lines)
+    for i, line in enumerate(lines):
+        if line.strip().lower().startswith("kind regards"):
+            sig_start = i
+            break
+    for pattern, typo in _TYPO_SUBS:
+        for i in range(sig_start):
+            if "http" in lines[i] or "@" in lines[i]:
+                continue
+            m = pattern.search(lines[i])
+            if m:
+                word = m.group(0)
+                t = typo[0].upper() + typo[1:] if word[0].isupper() else typo
+                lines[i] = lines[i][: m.start()] + t + lines[i][m.end():]
+                return "\n".join(lines)
+    return body
+
+
 def _custom_instructions_block(custom_instructions: str) -> str:
     # A user typed instruction about their own tone or format outranks the
     # generic style of this app but never the honesty rules, so it is
@@ -649,6 +689,11 @@ What makes an email high impact, hold every sentence to this bar:
   player", "passion for", "wear many hats", "leverage", "proven track record", "I am writing to
   express"). It should read like one sharp person wrote it, not a template.
 - Warm and confident, never groveling and never arrogant. Respect the reader's time.
+- Write like a real person typing an email, not like polished corporate prose. Use natural
+  contractions where a person would (I'm, I've, that's, it's). Let one or two sentences be plain
+  and direct the way people actually write ("That work taught me more about production systems
+  than any course could"). Never make consecutive sentences follow the same grammatical shape;
+  perfectly parallel structure is the fastest way to sound machine written.
 - Never desperate. One clear statement of interest is enough for the whole email; never repeat how
   much they want the job, never over praise the company, never apologize for a gap, and never
   plead ("any opportunity would mean the world", "I would be honored", "even a small chance").
@@ -705,7 +750,7 @@ Extra context from the candidate: {extra_context}"""
     if isinstance(result, dict) and result.get("subject") and result.get("body"):
         return {
             "subject": _scrub_ai_tells(str(result["subject"])),
-            "body": _scrub_ai_tells(str(result["body"])),
+            "body": _add_human_typo(_scrub_ai_tells(str(result["body"]))),
         }
 
     # Fallback mirrors the exact same layout the prompt demands, so a
