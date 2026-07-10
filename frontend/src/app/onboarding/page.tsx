@@ -101,22 +101,24 @@ function OnboardingPageInner() {
   });
 
   // ── Step 2: your links ───────────────────────────────────────────
-  // These two links go into every application email signature character
-  // for character, so the person confirms them explicitly instead of
-  // trusting whatever the resume parser found.
+  // These links go into every application email signature character for
+  // character, so the person confirms them explicitly instead of trusting
+  // whatever the resume parser found.
   const [links, setLinks] = useState({ linkedin_url: "", github_url: "", portfolio_url: "" });
-  const [linksPrefilled, setLinksPrefilled] = useState(false);
-  const readyResume = resumes.find((r: any) => r.status === "ready");
-  useEffect(() => {
-    if (linksPrefilled || (!profile && !readyResume)) return;
-    const parsed = readyResume?.parsed_data || {};
+  // Seeded at the moment the user leaves the resume step, not from a
+  // lock-once effect. The links step is only reachable through this call,
+  // and by then the resume is ready and the backend has seeded the profile,
+  // so we read the freshest values instead of racing an effect that could
+  // fire (and permanently lock on empty) while the resume was still parsing.
+  const seedLinksAndAdvance = () => {
+    const parsed = resumes.find((r: any) => r.status === "ready")?.parsed_data || {};
     setLinks({
       linkedin_url: profile?.linkedin_url || parsed.linkedin || "",
       github_url: profile?.github_url || parsed.github || "",
       portfolio_url: profile?.portfolio_url || parsed.portfolio || "",
     });
-    setLinksPrefilled(true);
-  }, [profile, readyResume, linksPrefilled]);
+    setStep(1);
+  };
 
   const saveLinksMut = useMutation({
     mutationFn: () =>
@@ -241,7 +243,7 @@ function OnboardingPageInner() {
             )}
 
             <button
-              onClick={() => setStep(1)}
+              onClick={seedLinksAndAdvance}
               disabled={!hasReadyResume}
               className="btn-primary w-full justify-center py-2.5"
             >

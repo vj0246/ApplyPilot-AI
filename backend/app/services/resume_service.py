@@ -40,39 +40,47 @@ def save_file(data: bytes, filename: str, user_id: str) -> str:
     return str(path)
 
 
+def _append_links(text: str, links: list) -> str:
+    if not links:
+        return text
+    return text + (
+        "\n\nHyperlinks embedded in the document, these are the real clickable "
+        "link targets, exactly as they appear in the file:\n" + "\n".join(links)
+    )
+
+
 def extract_text(file_path: str, mime_type: str) -> str:
     p = Path(file_path)
 
     if mime_type == "application/pdf":
+        # Resumes usually hide the real URL behind clickable text like
+        # "LinkedIn" or "GitHub" — the target lives in the PDF's link
+        # annotations, not the text layer, so without this the parser never
+        # sees the actual profile URLs. Collected once and appended to
+        # whichever text extractor wins below.
+        links: list[str] = []
         try:
             import fitz
             doc  = fitz.open(str(p))
             text = "\n".join(page.get_text("text") for page in doc)
-            # Resumes usually hide the real URL behind clickable text like
-            # "LinkedIn" or "GitHub" — the target lives in the PDF's link
-            # annotations, not in the text layer, so without this the
-            # parser never sees the actual profile URLs.
-            links: list[str] = []
             for page in doc:
                 for lnk in page.get_links():
                     uri = (lnk.get("uri") or "").strip()
                     if uri and uri not in links:
                         links.append(uri)
-            if links:
-                text += (
-                    "\n\nHyperlinks embedded in the document, these are the real clickable "
-                    "link targets, exactly as they appear in the file:\n"
-                    + "\n".join(links)
-                )
+            # Gauge sufficiency on the real text layer only. The link block
+            # must never be what pushes a near empty text layer past the
+            # threshold, or a scanned or Canva style resume would return
+            # only its hyperlinks and skip the pdfminer fallback entirely.
             if len(text.strip()) > 80:
-                return text
+                return _append_links(text, links)
         except Exception:
             pass
         try:
             from pdfminer.high_level import extract_text as pm
             text = pm(str(p))
             if text and len(text.strip()) > 80:
-                return text
+                return _append_links(text, links)
         except Exception:
             pass
         raise ValueError("Could not extract text from PDF.")

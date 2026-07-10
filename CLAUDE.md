@@ -59,7 +59,14 @@ render.yaml                  Render blueprint (backend only)
    Team, / I hope you are doing well. / interest paragraph / projects
    paragraph / honest alignment paragraph / contribution paragraph / thanks /
    Kind regards, name, "Resume Attached", "LinkedIn: <link>", "GitHub:
-   <link>". Links copied character for character from the parsed resume.
+   <link>", "Portfolio: <link>". Links come from the profile (LinkedIn,
+   GitHub, portfolio), copied character for character; a link with none on
+   file drops its whole signature line. The whole email is deterministically
+   post processed after generation (`_scrub_ai_tells`, `_strip_dashes`,
+   `_add_human_typo`): AI tell phrases are rewritten, dashes are removed
+   (number ranges become "to"), and exactly one natural misspelling is
+   injected into the body, never into a proper noun, title, signature, or
+   link line.
 4. **Resume attachment is compulsory** on every send; refuse loudly if the
    file is unavailable rather than sending without it.
 5. **Never store or replay a user's real Google password.** Sign in walls on

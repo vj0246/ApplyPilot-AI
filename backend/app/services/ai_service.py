@@ -55,27 +55,58 @@ Writing standards, follow every one of these without exception:
 # proven ability" is enough to make a whole email read machine written.
 # Only substitutions that are grammatically safe in any sentence belong
 # here — anything needing real rewriting stays a prompt problem.
+# The third element marks single word entries: those are only replaced
+# when they appear fully lowercase, because a capitalized occurrence can
+# be part of a proper noun ("Leverage Edu", "Showcase IDX") that every
+# prompt rule demands copied character for character. Multi word phrases
+# are never proper nouns, so they stay case insensitive.
 _AI_TELL_SUBS = [
-    (re.compile(r"\bleveraging\b", re.I), "using"),
-    (re.compile(r"\bleverages\b", re.I), "uses"),
-    (re.compile(r"\bleverage\b", re.I), "use"),
-    (re.compile(r"\bproven track record\b", re.I), "track record"),
-    (re.compile(r"\bproven ability\b", re.I), "ability"),
-    (re.compile(r"\bexcited to apply\b", re.I), "applying"),
-    (re.compile(r"\bI am thrilled\b", re.I), "I am glad"),
-    (re.compile(r"\bI would be honored\b", re.I), "I would be glad"),
-    (re.compile(r"\bshowcasing\b", re.I), "showing"),
-    (re.compile(r"\bshowcases\b", re.I), "shows"),
-    (re.compile(r"\bshowcase\b", re.I), "show"),
+    (re.compile(r"\bleveraging\b", re.I), "using", True),
+    (re.compile(r"\bleverages\b", re.I), "uses", True),
+    (re.compile(r"\bleverage\b", re.I), "use", True),
+    (re.compile(r"\bproven track record\b", re.I), "track record", False),
+    (re.compile(r"\bproven ability\b", re.I), "ability", False),
+    (re.compile(r"\bexcited to apply\b", re.I), "applying", False),
+    (re.compile(r"\bI am thrilled\b", re.I), "I am glad", False),
+    (re.compile(r"\bI'm thrilled\b", re.I), "I'm glad", False),
+    (re.compile(r"\bI would be honored\b", re.I), "I would be glad", False),
+    (re.compile(r"\bI'd be honored\b", re.I), "I'd be glad", False),
+    (re.compile(r"\bshowcasing\b", re.I), "showing", True),
+    (re.compile(r"\bshowcases\b", re.I), "shows", True),
+    (re.compile(r"\bshowcase\b", re.I), "show", True),
 ]
 
 
 def _scrub_ai_tells(text: str) -> str:
-    for pattern, replacement in _AI_TELL_SUBS:
-        def _sub(m: re.Match, replacement: str = replacement) -> str:
-            return replacement[0].upper() + replacement[1:] if m.group(0)[0].isupper() else replacement
+    for pattern, replacement, single_word in _AI_TELL_SUBS:
+        def _sub(m: re.Match, replacement: str = replacement, single_word: bool = single_word) -> str:
+            word = m.group(0)
+            if single_word and not word.islower():
+                return word
+            return replacement[0].upper() + replacement[1:] if word[0].isupper() else replacement
         text = pattern.sub(_sub, text)
     return text
+
+
+# The writing standards ban every dash, but the model still slips an em
+# dash in occasionally. A comma reads naturally in most spots a dash was
+# used, EXCEPT a dash between two numbers is a range (a date range like
+# "2019-2021", a salary range, a score range): there a comma silently
+# turns one range into a list of two separate values, so those become
+# " to " instead. Link and email lines are left alone entirely.
+_RANGE_DASH_RE = re.compile(r"(?<=\d)\s*[—–―]+\s*(?=\d)")
+_DASH_RE = re.compile(r"\s*[—–―]+\s*")
+
+
+def _strip_dashes(text: str) -> str:
+    out = []
+    for line in text.split("\n"):
+        if "http" in line or "@" in line:
+            out.append(line)
+            continue
+        line = _RANGE_DASH_RE.sub(" to ", line)
+        out.append(_DASH_RE.sub(", ", line))
+    return "\n".join(out)
 
 
 # One deliberate, natural looking misspelling per email — a perfectly
@@ -97,8 +128,11 @@ _TYPO_SUBS = [
 
 def _add_human_typo(body: str) -> str:
     """Insert exactly one misspelling into the email body. Never touches the
-    signature block, and never a line carrying a link or an email address,
-    where a typo would break something real instead of looking human."""
+    signature block, never a line carrying a link or an email address, and
+    only a fully lowercase occurrence of the word, so a capitalized word
+    that is part of a company name, product, or job title (for example
+    "Customer Experience Intern" or "Opportunity Labs") is never corrupted
+    into a real looking spelling error under the candidate's name."""
     lines = body.split("\n")
     sig_start = len(lines)
     for i, line in enumerate(lines):
@@ -109,11 +143,10 @@ def _add_human_typo(body: str) -> str:
         for i in range(sig_start):
             if "http" in lines[i] or "@" in lines[i]:
                 continue
-            m = pattern.search(lines[i])
-            if m:
-                word = m.group(0)
-                t = typo[0].upper() + typo[1:] if word[0].isupper() else typo
-                lines[i] = lines[i][: m.start()] + t + lines[i][m.end():]
+            for m in pattern.finditer(lines[i]):
+                if not m.group(0).islower():
+                    continue  # part of a proper noun or title, leave exact
+                lines[i] = lines[i][: m.start()] + typo + lines[i][m.end():]
                 return "\n".join(lines)
     return body
 
@@ -563,7 +596,7 @@ Extra context from applicant: {extra_context}"""
     # variation between runs, it's what makes the Regenerate button
     # on the review page actually useful
     result = await _chat(prompt, system, temperature=0.7, max_tokens=600)
-    return _scrub_ai_tells(result.strip()) if result else _fallback_cover_letter(name, job_parsed, fit)
+    return _strip_dashes(_scrub_ai_tells(result.strip())) if result else _fallback_cover_letter(name, job_parsed, fit)
 
 
 def _fallback_cover_letter(name: str, job: Dict, fit: Dict) -> str:
@@ -653,17 +686,20 @@ The email body must follow this exact layout, in this order, each part its own p
 by a blank line. This is the layout of a normal, warm, professional application email:
 1. "Dear Hiring Team," on its own line (or "Dear [Name]," if a recipient name is given)
 2. "I hope you are doing well." on its own line
-3. An interest paragraph: state interest in the exact role at the exact company, then one sentence
-   positioning who the candidate is (their study or current role and focus) and one grounded
-   sentence on why this role fits the work they already do, stated as fact, not as excitement
+3. A short opening paragraph: one sentence naming the exact role at the exact company and who the
+   candidate is (their study or current role and focus), plus at most one grounded sentence tying
+   their work to the job description. No feelings padding, no "I am deeply interested", no
+   admiration of the company; the evidence in the next paragraphs is what expresses the interest
 4. A projects paragraph, the heart of the email: walk through two or three real projects from the
    list below in flowing sentences, each with what was concretely built, the methods or tools used,
    and what it demonstrated. Only projects that are listed, never an invented one. Open each
    project's sentences differently; never the same "In the X project I built" pattern repeated,
    which reads as a template
-5. An honest alignment paragraph: name what in their background maps directly to what this job asks
-   for, acknowledge gracefully anything the role centers on that their work has only been adjacent
-   to, and state the concrete skills they are confident in and what they are eager to deepen
+5. An honest alignment paragraph anchored in the job description's own words: take its most
+   important requirements and responsibilities one by one and map each to something concrete in
+   the background, acknowledging gracefully anything the role centers on that their work has only
+   been adjacent to. Never re describe a project the projects paragraph already covered; refer to
+   it by name at most
 6. A contribution paragraph: one or two sentences on what they would concretely contribute at this
    company, tied to what the company actually does, stated as a capability, never as a plea
 7. A closing paragraph: thank them for their time and consideration, and say they would welcome a
@@ -717,6 +753,12 @@ Non negotiable rules:
    phrase "application programming interface". Where that last phrase would appear, write
    "services", "backends", or "endpoints" instead; these read like a person, the expansion reads
    like a machine
+7. Zero repetition anywhere in the email: every fact, project detail, metric, skill, and distinctive
+   phrase appears exactly once. If one paragraph said it, no other paragraph may say it again in
+   different words. Before returning, reread the whole email and cut any sentence that restates
+   information already given
+8. The job description is the spine of the email: every paragraph must visibly answer something the
+   job description actually asks for, with the projects paragraph carrying the weight of the case
 {WRITING_STANDARDS}{_custom_instructions_block(custom_instructions)}
 Return JSON: {{"subject": "...", "body": "..."}}"""
 
@@ -753,8 +795,8 @@ Extra context from the candidate: {extra_context}"""
         )
     if isinstance(result, dict) and result.get("subject") and result.get("body"):
         return {
-            "subject": _scrub_ai_tells(str(result["subject"])),
-            "body": _add_human_typo(_scrub_ai_tells(str(result["body"]))),
+            "subject": _strip_dashes(_scrub_ai_tells(str(result["subject"]))),
+            "body": _add_human_typo(_strip_dashes(_scrub_ai_tells(str(result["body"])))),
         }
 
     # Fallback mirrors the exact same layout the prompt demands, so a
@@ -832,7 +874,10 @@ Return ONLY this JSON structure:
 {WRITING_STANDARDS}"""
 
     qa_formatted = "\n\n".join(f"Question: {p.get('question','')}\nAnswer: {p.get('answer','')}" for p in qa_pairs)
-    result = await _json_chat(f"Build the knowledge graph from these answers:\n\n{qa_formatted}", system)
+    # A thirteen field graph built from up to eight long free text answers is
+    # a large JSON payload; at the default 2000 cap a thorough interview
+    # truncates, fails to parse, and the whole interview is silently lost.
+    result = await _json_chat(f"Build the knowledge graph from these answers:\n\n{qa_formatted}", system, max_tokens=4000)
     if isinstance(result, list):
         result = next((x for x in result if isinstance(x, dict)), None)
     return result if isinstance(result, dict) and result else {
@@ -1099,7 +1144,7 @@ Return a JSON object with one key "answers" holding an array, one object per que
         if result:
             for item in result:
                 if isinstance(item.get("answer"), str):
-                    item["answer"] = _scrub_ai_tells(item["answer"])
+                    item["answer"] = _strip_dashes(_scrub_ai_tells(item["answer"]))
             return result
 
     answers = []
@@ -1149,4 +1194,9 @@ Resume:
     # lower temperature than the cover letter — rewriting facts about
     # someone's career should be boring and consistent, not "creative"
     result = await _chat(prompt, system, temperature=0.3, max_tokens=1500)
-    return result.strip() if result else raw_text
+    # Same anti machine tell and no dash cleanup every other writer gets;
+    # this is the document a recruiter reads most closely, so it must not
+    # be the one artifact that ships with "leveraging" or an em dash. No
+    # deliberate typo here though: a misspelling on a resume reads as
+    # careless, not human.
+    return _strip_dashes(_scrub_ai_tells(result.strip())) if result else raw_text

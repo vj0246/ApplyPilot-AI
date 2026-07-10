@@ -118,7 +118,13 @@ async def update_profile(
 ):
     p = await _get_profile(u, db)
 
-    for field, value in body.model_dump(exclude_none=True).items():
+    # exclude_unset, not exclude_none: a field the client did not send stays
+    # untouched, but a field explicitly set to null is a deliberate clear and
+    # must go through. The onboarding "confirm your links" step relies on
+    # this to delete a wrong link the resume parser seeded — with
+    # exclude_none that null was dropped and the bad link survived into every
+    # email signature, which is exactly what that step exists to prevent.
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(p, field, value)
 
     await db.commit()
