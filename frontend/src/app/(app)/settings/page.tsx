@@ -290,6 +290,14 @@ function SettingsPageInner() {
                 </div>
 
                 <div>
+                  <label className="label">Portfolio website</label>
+                  <input {...register("portfolio_url")} placeholder="https://yoursite.dev" className="input" />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Added to your application email signature exactly as written here.
+                  </p>
+                </div>
+
+                <div>
                   <label className="label">Experience level</label>
                   <select {...register("experience_level")} className="input capitalize">
                     <option value="">Select...</option>

@@ -92,6 +92,7 @@ async def apply_chat(
             custom_instructions=(profile.custom_instructions if profile else None) or "",
             linkedin_url=(profile.linkedin_url if profile else None) or "",
             github_url=(profile.github_url if profile else None) or "",
+            portfolio_url=(profile.portfolio_url if profile else None) or "",
         )
         e = EmailSend(
             user_id=u.id,

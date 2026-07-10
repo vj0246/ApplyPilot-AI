@@ -223,6 +223,7 @@ async def create_draft(
         custom_instructions=custom_instructions,
         linkedin_url=(profile.linkedin_url if profile else None) or "",
         github_url=(profile.github_url if profile else None) or "",
+        portfolio_url=(profile.portfolio_url if profile else None) or "",
     )
 
     e = EmailSend(

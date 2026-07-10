@@ -593,6 +593,7 @@ async def generate_email(
     custom_instructions: str = "",
     linkedin_url: str = "",
     github_url: str = "",
+    portfolio_url: str = "",
 ) -> Dict[str, str]:
     job_title    = job_parsed.get("title", "the role")
     company      = job_parsed.get("company", "the company")
@@ -614,6 +615,7 @@ async def generate_email(
     # trusted for something that goes out under their name in every email.
     linkedin_url = (linkedin_url or "").strip()
     github_url = (github_url or "").strip()
+    portfolio_url = (portfolio_url or "").strip()
     project_lines = []
     for pr in (rp.get("projects") or [])[:4]:
         line = pr.get("name") or ""
@@ -672,10 +674,11 @@ by a blank line. This is the layout of a normal, warm, professional application 
    "Resume Attached"
    "LinkedIn: " followed by the LinkedIn link
    "GitHub: " followed by the GitHub link
-   The LinkedIn and GitHub links given below, and only those, are the candidate's real links.
-   Copy each one character for character exactly as given, never shortened, reworded, or
-   reconstructed, and never invent or infer a link from anywhere else. If a link below says none
-   on file, leave that entire signature line out completely rather than guessing one
+   "Portfolio: " followed by the portfolio link
+   The LinkedIn, GitHub, and portfolio links given below, and only those, are the candidate's
+   real links. Copy each one character for character exactly as given, never shortened, reworded,
+   or reconstructed, and never invent or infer a link from anywhere else. If a link below says
+   none on file, leave that entire signature line out completely rather than guessing one
 
 What makes an email high impact, hold every sentence to this bar:
 - Lead with substance. The first real sentence should already say something specific about this
@@ -724,6 +727,7 @@ Candidate: {name}
 Current role or education (copy any title or institution name exactly as written here): {current_role or edu_line}
 Candidate's GitHub link: {github_url or "(none on file)"}
 Candidate's LinkedIn link: {linkedin_url or "(none on file)"}
+Candidate's portfolio link: {portfolio_url or "(none on file)"}
 Candidate's work experience:
 {experience_block or "(none on file)"}
 Candidate's real projects:
@@ -776,6 +780,8 @@ Extra context from the candidate: {extra_context}"""
         signature_lines.append(f"LinkedIn: {linkedin_url}")
     if github_url:
         signature_lines.append(f"GitHub: {github_url}")
+    if portfolio_url:
+        signature_lines.append(f"Portfolio: {portfolio_url}")
 
     return {
         "subject": f"Application for {job_title}, {name}",
