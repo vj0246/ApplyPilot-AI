@@ -102,8 +102,10 @@ export const appApi = {
 // recipient email, it starts the form fill and/or drafts the email and
 // returns their ids for the review cards.
 export const applyApi = {
+  // Generous timeout: on the free hosting tier the backend can need a full
+  // cold start (about a minute) before the drafting call even begins.
   chat: (d: { message: string; resume_id: string }) =>
-    api.post("/apply/chat", d, { timeout: 90_000 }),
+    api.post("/apply/chat", d, { timeout: 180_000 }),
 };
 
 // ── Form Autofill (Google Forms and Microsoft Forms) ────────────────
@@ -111,7 +113,7 @@ export const applyApi = {
 // submit yourself inside the actual form tab.
 export const autofillApi = {
   start: (d: { form_url: string; resume_id: string; job_id?: string; extra_context?: string }) =>
-    api.post("/autofill/form", d, { timeout: 90_000 }),
+    api.post("/autofill/form", d, { timeout: 180_000 }),
   get: (id: string) => api.get(`/autofill/${id}`),
   editAnswers: (id: string, answers: { index: number; answer: string }[]) =>
     api.patch(`/autofill/${id}/answers`, { answers }),

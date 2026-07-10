@@ -6,13 +6,14 @@ import { useDropzone } from "react-dropzone";
 import toast from "react-hot-toast";
 import {
   Upload, FileText, Loader2, CheckCircle2, BrainCircuit, Mail, Zap, ArrowRight, ExternalLink,
+  Link as LinkIcon,
 } from "lucide-react";
 import { resumeApi, profileApi, emailApi } from "@/lib/api";
 import { Card, Textarea } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth";
 
-const STEPS = ["Resume", "Knowledge graph", "Email account"] as const;
+const STEPS = ["Resume", "Your links", "Knowledge graph", "Email account"] as const;
 
 export default function OnboardingPage() {
   // useSearchParams needs a Suspense boundary to prerender, so the page
@@ -32,7 +33,7 @@ function OnboardingPageInner() {
   // Coming back from the Gmail consent screen mid wizard lands here with
   // ?gmailstep=1&gmail=connected — jump straight to the email step
   // instead of restarting the wizard from the resume upload.
-  const [step, setStep] = useState(searchParams.get("gmailstep") === "1" ? 2 : 0);
+  const [step, setStep] = useState(searchParams.get("gmailstep") === "1" ? 3 : 0);
 
   useEffect(() => {
     const token = typeof window !== "undefined" ? sessionStorage.getItem("ap_token") : null;
@@ -99,7 +100,40 @@ function OnboardingPageInner() {
     multiple: false,
   });
 
-  // ── Step 2: knowledge graph ──────────────────────────────────────
+  // ── Step 2: your links ───────────────────────────────────────────
+  // These two links go into every application email signature character
+  // for character, so the person confirms them explicitly instead of
+  // trusting whatever the resume parser found.
+  const [links, setLinks] = useState({ linkedin_url: "", github_url: "", portfolio_url: "" });
+  const [linksPrefilled, setLinksPrefilled] = useState(false);
+  const readyResume = resumes.find((r: any) => r.status === "ready");
+  useEffect(() => {
+    if (linksPrefilled || (!profile && !readyResume)) return;
+    const parsed = readyResume?.parsed_data || {};
+    setLinks({
+      linkedin_url: profile?.linkedin_url || parsed.linkedin || "",
+      github_url: profile?.github_url || parsed.github || "",
+      portfolio_url: profile?.portfolio_url || parsed.portfolio || "",
+    });
+    setLinksPrefilled(true);
+  }, [profile, readyResume, linksPrefilled]);
+
+  const saveLinksMut = useMutation({
+    mutationFn: () =>
+      profileApi.update({
+        linkedin_url: links.linkedin_url.trim() || null,
+        github_url: links.github_url.trim() || null,
+        portfolio_url: links.portfolio_url.trim() || null,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["profile"] });
+      toast.success("Links saved");
+      setStep(2);
+    },
+    onError: (err: any) => toast.error(err.response?.data?.detail || "Could not save your links"),
+  });
+
+  // ── Step 3: knowledge graph ──────────────────────────────────────
   const { data: kgQuestions } = useQuery({
     queryKey: ["knowledge-graph-questions"],
     queryFn: () => profileApi.knowledgeGraphQuestions().then(r => r.data.questions as string[]),
@@ -219,6 +253,60 @@ function OnboardingPageInner() {
         {step === 1 && (
           <Card className="space-y-5">
             <div>
+              <h2 className="font-semibold text-gray-900 flex items-center gap-2"><LinkIcon className="w-4 h-4" /> Confirm your links</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                These go into every application email signature exactly as written here, so make
+                sure they are right. Anything found in your resume is already filled in.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="label">LinkedIn URL</label>
+                <input
+                  value={links.linkedin_url}
+                  onChange={(e) => setLinks((l) => ({ ...l, linkedin_url: e.target.value }))}
+                  placeholder="https://linkedin.com/in/yourname"
+                  className="input"
+                />
+              </div>
+              <div>
+                <label className="label">GitHub URL</label>
+                <input
+                  value={links.github_url}
+                  onChange={(e) => setLinks((l) => ({ ...l, github_url: e.target.value }))}
+                  placeholder="https://github.com/yourname"
+                  className="input"
+                />
+              </div>
+              <div>
+                <label className="label">Portfolio URL (optional)</label>
+                <input
+                  value={links.portfolio_url}
+                  onChange={(e) => setLinks((l) => ({ ...l, portfolio_url: e.target.value }))}
+                  placeholder="https://yoursite.dev"
+                  className="input"
+                />
+              </div>
+            </div>
+
+            <button
+              onClick={() => saveLinksMut.mutate()}
+              disabled={saveLinksMut.isPending}
+              className="btn-primary w-full justify-center py-2.5"
+            >
+              {saveLinksMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Save and continue <ArrowRight className="w-4 h-4" /></>}
+            </button>
+
+            <button onClick={() => setStep(2)} className="text-xs text-gray-400 hover:text-gray-600 w-full text-center">
+              Skip for now, add them later in settings
+            </button>
+          </Card>
+        )}
+
+        {step === 2 && (
+          <Card className="space-y-5">
+            <div>
               <h2 className="font-semibold text-gray-900 flex items-center gap-2"><BrainCircuit className="w-4 h-4" /> Tell us about yourself</h2>
               <p className="text-sm text-gray-500 mt-1">Answer in your own words. This becomes a knowledge graph of your values, strengths, and motivations that every form answer and email is grounded in, not just your resume.</p>
             </div>
@@ -249,18 +337,18 @@ function OnboardingPageInner() {
                 )}
               </button>
             ) : (
-              <button onClick={() => setStep(2)} className="btn-primary w-full justify-center py-2.5">
+              <button onClick={() => setStep(3)} className="btn-primary w-full justify-center py-2.5">
                 Continue <ArrowRight className="w-4 h-4" />
               </button>
             )}
 
-            <button onClick={() => setStep(2)} className="text-xs text-gray-400 hover:text-gray-600 w-full text-center">
+            <button onClick={() => setStep(3)} className="text-xs text-gray-400 hover:text-gray-600 w-full text-center">
               Skip for now, answer this later in settings
             </button>
           </Card>
         )}
 
-        {step === 2 && (
+        {step === 3 && (
           <Card className="space-y-5">
             <div>
               <h2 className="font-semibold text-gray-900 flex items-center gap-2"><Mail className="w-4 h-4" /> Sending is ready</h2>

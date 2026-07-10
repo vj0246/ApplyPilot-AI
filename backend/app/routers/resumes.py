@@ -86,12 +86,23 @@ async def _process(rid: str, uid: str):
             r.ats_score   = await ai_service.compute_ats_score(parsed)
             r.status      = "ready"
 
-            # seed the profile's skill list from the resume if it's empty —
-            # saves a manual step in Settings for new users
+            # seed empty profile fields from the resume — saves manual steps
+            # in Settings for new users. Only ever fills a blank; a value the
+            # person typed themselves is never overwritten by a parse.
             res = await db.execute(select(Profile).where(Profile.user_id == uuid.UUID(uid)))
             prof = res.scalar_one_or_none()
-            if prof and not prof.skills and parsed.get("skills"):
-                prof.skills = parsed["skills"][:25]
+            if prof:
+                if not prof.skills and parsed.get("skills"):
+                    prof.skills = parsed["skills"][:25]
+                for prof_field, parsed_field, max_len in (
+                    ("phone", "phone", 50),
+                    ("location", "location", 255),
+                    ("linkedin_url", "linkedin", 2048),
+                    ("github_url", "github", 2048),
+                    ("portfolio_url", "portfolio", 2048),
+                ):
+                    if not getattr(prof, prof_field) and parsed.get(parsed_field):
+                        setattr(prof, prof_field, str(parsed[parsed_field]).strip()[:max_len])
 
             await db.commit()
             log.info(f"Resume {rid} ready — ATS score: {r.ats_score}")

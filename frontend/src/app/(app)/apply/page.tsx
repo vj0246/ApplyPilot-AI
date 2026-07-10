@@ -288,7 +288,13 @@ function ApplyPageInner() {
       setChatMessages(m => [...m, { role: "assistant", text: data.reply, emailDraftId: data.email_draft_id, runId: data.autofill_run_id }]);
       setChatInput("");
     },
-    onError: (err: any) => toast.error(err.response?.data?.detail || "Could not process that message"),
+    onError: (err: any) => {
+      const detail = err.response?.data?.detail;
+      if (typeof detail === "string" && detail) toast.error(detail);
+      else if (err.code === "ECONNABORTED" || !err.response)
+        toast.error("The server took too long to respond, it may be waking up. Try again in a minute.");
+      else toast.error("Could not process that message");
+    },
   });
 
   const sendChat = () => {
