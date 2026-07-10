@@ -48,6 +48,22 @@ def extract_text(file_path: str, mime_type: str) -> str:
             import fitz
             doc  = fitz.open(str(p))
             text = "\n".join(page.get_text("text") for page in doc)
+            # Resumes usually hide the real URL behind clickable text like
+            # "LinkedIn" or "GitHub" — the target lives in the PDF's link
+            # annotations, not in the text layer, so without this the
+            # parser never sees the actual profile URLs.
+            links: list[str] = []
+            for page in doc:
+                for lnk in page.get_links():
+                    uri = (lnk.get("uri") or "").strip()
+                    if uri and uri not in links:
+                        links.append(uri)
+            if links:
+                text += (
+                    "\n\nHyperlinks embedded in the document, these are the real clickable "
+                    "link targets, exactly as they appear in the file:\n"
+                    + "\n".join(links)
+                )
             if len(text.strip()) > 80:
                 return text
         except Exception:

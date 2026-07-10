@@ -204,7 +204,10 @@ Parsing rules, follow all of them:
 4. Capture every profile link, even without "https": text like "github.com/name" or
    "linkedin.com/in/name" is a real link. Keep the entire path and every character of the link
    id exactly as written, never shorten, complete, or guess any part of it; only prepend
-   "https://" when the scheme is missing
+   "https://" when the scheme is missing. If the text ends with a section of hyperlinks embedded
+   in the document, those are the real clickable targets and always win over any shortened or
+   display version of the same link in the body: match each one to the right field (linkedin,
+   github, portfolio, or a project url) and copy it character for character
 5. Keep numbers and metrics inside bullets exactly as written, never round or reword them
 6. Do not drop skills because they look minor, list every tool, framework, library, and language
    mentioned anywhere in the text
